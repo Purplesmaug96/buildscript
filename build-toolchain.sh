@@ -17,21 +17,38 @@ ANSI_CLR="\033[0m"
 TOOLCHAIN_NAME="OpenXeChain"
 TOOLCHAIN_STEM="${ANSI_GRN}${TOOLCHAIN_NAME}${ANSI_CLR}> "
 
+# This script can be run from any directory
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+cd "${SCRIPT_DIR}"
+
 # User-configurable variables
-PREFIX="$(realpath ${PREFIX:-sysroot})" # Sysroot for the toolchain to be installed into
+PREFIX="${PREFIX:-${SCRIPT_DIR}/sysroot}" # Sysroot for the toolchain to be installed into
+PREFIX="$(realpath -m "${PREFIX}")"
 HOST_CC="${HOST_CC:-clang}" # Host compiler to use (MUST BE CLANG)
 HOST_CXX="${HOST_CXX:-clang++}"
 BUILD_TYPE="${BUILD_TYPE:-Release}" # Debug level to build LLVM in
 PARALLEL="${PARALLEL:-$(nproc)}" # Number of parallel make jobs to run
+LLVM_LINK_JOBS="${LLVM_LINK_JOBS:-2}" # Max parallel link jobs for LLVM (linking is memory-hungry)
+CLEAN="${CLEAN:-0}" # Set to 1 to wipe the build directories before building
 
 # Static variables
 LLVM_TARGET="ppc32-xbox360"
 NEWLIB_TARGET="ppc-xbox360"
-OLD_PWD="${PWD}"
+
+# Build directories. Every component is built in its own directory so that
+# re-running this script only rebuilds what actually changed, instead of
+# rebuilding the entire toolchain from scratch every time.
+BUILD_DIR="${SCRIPT_DIR}/build"
+LLVM_BUILD_DIR="${BUILD_DIR}/llvm"
+XECORELIB_BUILD_DIR="${BUILD_DIR}/xecorelib"
+XECORELIB_STAGE_DIR="${XECORELIB_BUILD_DIR}/stage"
+NEWLIB_BUILD_DIR="${BUILD_DIR}/newlib"
+CRT_BUILD_DIR="${BUILD_DIR}/compiler-rt"
+SYNTHXEX_BUILD_DIR="${BUILD_DIR}/synthxex"
 
 # Build log path
-BUILD_LOG="${OLD_PWD}/build.log"
-echo "" > "${BUILD_LOG}" # Delete the old logs, if they exist
+BUILD_LOG="${SCRIPT_DIR}/build.log"
+: > "${BUILD_LOG}" # Delete the old logs, if they exist
 
 # If we fail to build, run this
 fail_build()
@@ -99,20 +116,9 @@ check_deps()
     # Zlib cannot be checked like this as it has no binaries, but it should have been installed
     # as a dependency of python3
 
-    # Check for pyyaml with a simple python script
-    cat > "test-pyyaml-openxechain.py" << EOF
-import importlib.util
-pyyaml_test=importlib.util.find_spec('yaml')
-if pyyaml_test is None:
-        exit(1)
-else:
-        exit(0)
-EOF
-
-    python3 test-pyyaml-openxechain.py >> "${BUILD_LOG}" 2>&1 ||
+    # Check for pyyaml
+    python3 -c "import yaml" >> "${BUILD_LOG}" 2>&1 ||
         (MISSING_DEPS=1 && echo -e "${TOOLCHAIN_STEM}${ANSI_RED}Missing python-pyyaml!${ANSI_CLR}")
-
-    rm -f test-pyyaml-openxechain.py
 
     if [[ ${MISSING_DEPS} -ne 0 ]]; then
         echo -e "${TOOLCHAIN_STEM}${ANSI_RED}Dependencies are missing! Please install them.${ANSI_CLR}"
@@ -121,46 +127,74 @@ EOF
     return ${MISSING_DEPS}
 }
 
-cd "$(dirname $0)" || fail_build
-
 if [[ ! -d "newlib" || ! -d "llvm" || ! -d "synthxex" || ! -d "xecorelib" ]]; then
     echo -e "${TOOLCHAIN_STEM}${ANSI_RED}Submodules are missing! Please re-clone this repository with --recursive.${ANSI_CLR}"
     fail_build
 fi
 
-# Create the sysroot directory, if it doesn't already exist
+if [[ "${CLEAN}" == "1" ]]; then
+    echo -e "${TOOLCHAIN_STEM}Wiping build directories."
+    rm -rf "${BUILD_DIR}"
+fi
+
+# Create the sysroot and build directories, if they don't already exist
 echo -e "${TOOLCHAIN_STEM}Creating sysroot directory \"${PREFIX}\"."
-mkdir -pv "${PREFIX}" >> "${BUILD_LOG}" 2>&1 || fail_build
+mkdir -p "${PREFIX}" \
+         "${LLVM_BUILD_DIR}" \
+         "${XECORELIB_BUILD_DIR}" "${XECORELIB_STAGE_DIR}" \
+         "${NEWLIB_BUILD_DIR}" \
+         "${CRT_BUILD_DIR}" \
+         "${SYNTHXEX_BUILD_DIR}" >> "${BUILD_LOG}" 2>&1 || fail_build
 
 # Make sure all required dependencies are installed
 echo -e "${TOOLCHAIN_STEM}Checking if required dependencies are installed."
-mkdir -pv "build" >> "${BUILD_LOG}" 2>&1 || fail_build
-cd "build" || fail_build
 check_deps || fail_build
 
 # Configure it first
 echo -e "${TOOLCHAIN_STEM}Configuring the cross compiler... (this may take a while)"
-cmake -DCMAKE_C_COMPILER="${HOST_CC}" \
-      -DCMAKE_CXX_COMPILER="${HOST_CXX}" \
-      -DCMAKE_BUILD_TYPE="${BUILD_TYPE}" \
-      -DCMAKE_INSTALL_PREFIX="${PREFIX}" \
-      -DLLVM_ENABLE_PROJECTS="lld;clang" \
-      -DLLVM_TARGETS_TO_BUILD=PowerPC \
-      -DLLVM_DEFAULT_TARGET_TRIPLE="${LLVM_TARGET}" \
-      -DLLVM_INSTALL_BINUTILS_SYMLINKS=true \
-      -DLLVM_INSTALL_CCTOOLS_SYMLINKS=true \
-      -DLLVM_INSTALL_TOOLCHAIN_ONLY=true \
-      -G "Ninja" ../llvm/llvm >> "${BUILD_LOG}" 2>&1 || fail_build
+
+LLVM_CMAKE_ARGS=(
+    -DCMAKE_C_COMPILER="${HOST_CC}"
+    -DCMAKE_CXX_COMPILER="${HOST_CXX}"
+    -DCMAKE_BUILD_TYPE="${BUILD_TYPE}"
+    -DCMAKE_INSTALL_PREFIX="${PREFIX}"
+    -DLLVM_ENABLE_PROJECTS="lld;clang"
+    -DLLVM_TARGETS_TO_BUILD=PowerPC
+    -DLLVM_DEFAULT_TARGET_TRIPLE="${LLVM_TARGET}"
+    -DLLVM_INSTALL_BINUTILS_SYMLINKS=true
+    -DLLVM_INSTALL_CCTOOLS_SYMLINKS=true
+    -DLLVM_INSTALL_TOOLCHAIN_ONLY=true
+    -DLLVM_INCLUDE_TESTS=false
+    -DLLVM_INCLUDE_BENCHMARKS=false
+    -DLLVM_INCLUDE_EXAMPLES=false
+    -DLLVM_INCLUDE_DOCS=false
+    -DLLVM_OPTIMIZED_TABLEGEN=true
+    -DLLVM_PARALLEL_LINK_JOBS="${LLVM_LINK_JOBS}"
+    -DCLANG_ENABLE_STATIC_ANALYZER=false
+    -DCLANG_ENABLE_ARCMT=false
+    -G "Ninja"
+)
+
+# Cache compiled objects with ccache if it is installed, to speed up rebuilds
+if command -v ccache > /dev/null 2>&1; then
+    LLVM_CMAKE_ARGS+=(-DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache)
+fi
+
+# Link with lld if it is installed, as it is much faster than the default linker
+if command -v ld.lld > /dev/null 2>&1; then
+    LLVM_CMAKE_ARGS+=(-DLLVM_USE_LINKER=lld)
+fi
+
+cmake -S "${SCRIPT_DIR}/llvm/llvm" -B "${LLVM_BUILD_DIR}" "${LLVM_CMAKE_ARGS[@]}" >> "${BUILD_LOG}" 2>&1 || fail_build
 
 # Now build and install
 echo -e "${TOOLCHAIN_STEM}Building the cross compiler... (this may take a WHILE)"
-ninja -j${PARALLEL} >> "${BUILD_LOG}" 2>&1 || fail_build
+ninja -C "${LLVM_BUILD_DIR}" -j"${PARALLEL}" >> "${BUILD_LOG}" 2>&1 || fail_build
 
 echo -e "${TOOLCHAIN_STEM}Installing the cross compiler... (this may take a while)"
-ninja install >> "${BUILD_LOG}" 2>&1 || fail_build
+ninja -C "${LLVM_BUILD_DIR}" install >> "${BUILD_LOG}" 2>&1 || fail_build
 
 echo -e "${TOOLCHAIN_STEM}Cross compiler built and installed!"
-rm -rf * # Clear the build directory, ready for xecorelib
 
 # Define the default command line flags to be used by the cross-compiler.
 # Linkage to Newlib/xecorelib is also added to these files, but after it's been built and installed.
@@ -195,24 +229,27 @@ export CPLUS_INCLUDE_PATH=""
 # Build xecorelib
 echo -e "${TOOLCHAIN_STEM}Building and installing xecorelib."
 
-# Run the xecorelib build script
-PREFIX="${PREFIX}" bash ../xecorelib/install.sh >> "${BUILD_LOG}" 2>&1 || fail_build
+cd "${XECORELIB_BUILD_DIR}" || fail_build
 
-# Also install to PWD, to build Newlib with it
-BINDIR="${PREFIX}/bin" PREFIX="${PWD}/xecorelibtmp" bash ../xecorelib/install.sh >> "${BUILD_LOG}" 2>&1 || fail_build
+# Run the xecorelib build script
+PREFIX="${PREFIX}" bash "${SCRIPT_DIR}/xecorelib/install.sh" >> "${BUILD_LOG}" 2>&1 || fail_build
+
+# Also install to a staging directory, to build Newlib with it
+BINDIR="${PREFIX}/bin" PREFIX="${XECORELIB_STAGE_DIR}" bash "${SCRIPT_DIR}/xecorelib/install.sh" >> "${BUILD_LOG}" 2>&1 || fail_build
 echo -e "${TOOLCHAIN_STEM}Built and installed xecorelib!"
 
-# Clear the build directory, ready for Newlib
-ls | grep -P "^(?!xecorelibtmp$).*$" | xargs -d"\n" rm -rf
+cd "${SCRIPT_DIR}" || fail_build
 
 # Build the Newlib libc
 echo -e "${TOOLCHAIN_STEM}Getting ready to build the Newlib C library."
 
+cd "${NEWLIB_BUILD_DIR}" || fail_build
+
 # Configure Newlib
 echo -e "${TOOLCHAIN_STEM}Configuring the Newlib C library... (this may take a while)"
 
-../newlib/newlib/configure \
-    CC="${PREFIX}/bin/clang -nostdlib -I${PWD}/xecorelibtmp/include" \
+"${SCRIPT_DIR}/newlib/newlib/configure" \
+    CC="${PREFIX}/bin/clang -nostdlib -I${XECORELIB_STAGE_DIR}/include" \
     CPP="${PREFIX}/bin/clang-cpp" \
     LD="${PREFIX}/bin/lld-link" \
     AR="${PREFIX}/bin/llvm-ar" \
@@ -228,10 +265,12 @@ echo -e "${TOOLCHAIN_STEM}Configuring the Newlib C library... (this may take a w
 
 # Now build and install
 echo -e "${TOOLCHAIN_STEM}Building the Newlib C library..."
-make -j${PARALLEL} >> "${BUILD_LOG}" 2>&1 || fail_build
+make -j"${PARALLEL}" >> "${BUILD_LOG}" 2>&1 || fail_build
 
 echo -e "${TOOLCHAIN_STEM}Installing the Newlib C library..."
 make install >> "${BUILD_LOG}" 2>&1 || fail_build
+
+cd "${SCRIPT_DIR}" || fail_build
 
 # Add Newlib/xecorelib linkage to the default compiler flags now that it is installed
 echo -e "${TOOLCHAIN_STEM}Adding Newlib linkage to Clang configuration scripts."
@@ -251,14 +290,14 @@ cat >> "${PREFIX}/bin/clang++.cfg" << EOF
 EOF
 
 echo -e "${TOOLCHAIN_STEM}Newlib C library built and installed!"
-rm -rf * # Clear the build directory, ready for compiler-rt
 
 # Configure compiler-rt
 # We need to override the compiler checks, otherwise CMake will attempt to
 # build test programs, which won't work, as it'll try to link compiler-rt,
 # which is not yet installed.
 echo -e "${TOOLCHAIN_STEM}Configuring compiler-rt..."
-cmake -DCMAKE_INSTALL_PREFIX="${PREFIX}" \
+cmake -S "${SCRIPT_DIR}/llvm/compiler-rt" -B "${CRT_BUILD_DIR}" \
+      -DCMAKE_INSTALL_PREFIX="${PREFIX}" \
       -DCMAKE_SYSTEM_NAME="Generic" \
       -DCMAKE_CROSSCOMPILING=true \
       -DCMAKE_C_COMPILER="${PREFIX}/bin/clang" \
@@ -279,14 +318,15 @@ cmake -DCMAKE_INSTALL_PREFIX="${PREFIX}" \
       -DCOMPILER_RT_STANDALONE_BUILD=true \
       -DCOMPILER_RT_BUILTINS_ENABLE_PIC=false \
       -DCOMPILER_RT_BAREMETAL_BUILD=true \
-      -G "Ninja" ../llvm/compiler-rt >> "${BUILD_LOG}" 2>&1 || fail_build
+      -DCOMPILER_RT_INCLUDE_TESTS=false \
+      -G "Ninja" >> "${BUILD_LOG}" 2>&1 || fail_build
 
 # Now build and install
 echo -e "${TOOLCHAIN_STEM}Building compiler-rt..."
-ninja -j${PARALLEL} >> "${BUILD_LOG}" 2>&1 || fail_build
+ninja -C "${CRT_BUILD_DIR}" -j"${PARALLEL}" >> "${BUILD_LOG}" 2>&1 || fail_build
 
 echo -e "${TOOLCHAIN_STEM}Installing compiler-rt..."
-ninja install >> "${BUILD_LOG}" 2>&1 || fail_build
+ninja -C "${CRT_BUILD_DIR}" install >> "${BUILD_LOG}" 2>&1 || fail_build
 
 # Add compiler-rt linkage to Clang config scripts
 echo -e "${TOOLCHAIN_STEM}Adding compiler-rt linkage to Clang configuration scripts."
@@ -302,7 +342,6 @@ cat >> "${PREFIX}/bin/clang++.cfg" << EOF
 EOF
 
 echo -e "${TOOLCHAIN_STEM}Compiler-rt built and installed!"
-rm -rf * # Clear the build directory, ready for SynthXEX
 
 # Restore the environment variables the C/C++ compiler is sensitive to
 export LIBRARY_PATH="${OLD_LIBRARY_PATH}"
@@ -315,18 +354,19 @@ echo -e "${TOOLCHAIN_STEM}Getting ready to build SynthXEX."
 # Configure SynthXEX
 echo -e "${TOOLCHAIN_STEM}Configuring SynthXEX..."
 
-cmake -DCMAKE_C_COMPILER="${HOST_CC}" \
+cmake -S "${SCRIPT_DIR}/synthxex" -B "${SYNTHXEX_BUILD_DIR}" \
+      -DCMAKE_C_COMPILER="${HOST_CC}" \
       -DCMAKE_CXX_COMPILER="${HOST_CXX}" \
       -DCMAKE_BUILD_TYPE="${BUILD_TYPE}" \
       -DCMAKE_INSTALL_PREFIX="${PREFIX}" \
-      -G "Ninja" ../synthxex >> "${BUILD_LOG}" 2>&1 || fail_build
+      -G "Ninja" >> "${BUILD_LOG}" 2>&1 || fail_build
 
 # Now build and install
 echo -e "${TOOLCHAIN_STEM}Building SynthXEX..."
-ninja -j${PARALLEL} >> "${BUILD_LOG}" 2>&1 || fail_build
+ninja -C "${SYNTHXEX_BUILD_DIR}" -j"${PARALLEL}" >> "${BUILD_LOG}" 2>&1 || fail_build
 
 echo -e "${TOOLCHAIN_STEM}Installing SynthXEX..."
-ninja install >> "${BUILD_LOG}" 2>&1 || fail_build
+ninja -C "${SYNTHXEX_BUILD_DIR}" install >> "${BUILD_LOG}" 2>&1 || fail_build
 
 echo -e "${TOOLCHAIN_STEM}SynthXEX built and installed!"
 
@@ -337,7 +377,5 @@ echo -e "${TOOLCHAIN_STEM}${ANSI_GRN}This toolchain is portable, it can be moved
 echo -e "${TOOLCHAIN_STEM}${ANSI_GRN}Ensure C_INCLUDE_PATH, CPLUS_INCLUDE_PATH, and LIBRARY_PATH${ANSI_CLR}"
 echo -e "${TOOLCHAIN_STEM}${ANSI_GRN}are set blank when using the toolchain, or you may encounter${ANSI_CLR}"
 echo -e "${TOOLCHAIN_STEM}${ANSI_GRN}interference from the host libraries.${ANSI_CLR}"
-
-cd ..
-rm -rf build
-rm -f build.log
+echo -e "${TOOLCHAIN_STEM}${ANSI_GRN}Build directories are kept in ${BUILD_DIR}, so re-running this${ANSI_CLR}"
+echo -e "${TOOLCHAIN_STEM}${ANSI_GRN}script will only rebuild what changed. Set CLEAN=1 to wipe them.${ANSI_CLR}"
