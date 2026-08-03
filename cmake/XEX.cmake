@@ -20,6 +20,8 @@ find_program(OPENXECHAIN_SYNTHXEX
     HINTS "${XECHAIN_SYSROOT}/bin" "${XECHAIN_SYSROOT}/libexec"
     DOC "SynthXEX - the XEX2 builder shipped with the OpenXeChain sysroot")
 
+set(OPENXECHAIN_XEX_DIR "${CMAKE_CURRENT_LIST_DIR}")
+
 function(openxechain_add_xex target)
     set(options "")
     set(oneValueArgs TYPE OUTPUT)
@@ -46,6 +48,7 @@ function(openxechain_add_xex target)
     endif()
 
     add_custom_command(TARGET "${target}" POST_BUILD
+        COMMAND "${CMAKE_COMMAND}" -E env python3 "${OPENXECHAIN_XEX_DIR}/PatchDosHeader.py" $<TARGET_FILE:${target}>
         COMMAND "${OPENXECHAIN_SYNTHXEX}" -i "$<TARGET_FILE:${target}>" -o "${xex_output}" ${type_args}
         COMMAND "${CMAKE_COMMAND}" -E echo "Built ${xex_output}"
         VERBATIM)

@@ -12,6 +12,16 @@
 // MmMapIoSpace), falling back to 0x1E000000 if the info page is not
 // maintained by the running kernel.
 //
+// Xenia
+// -----
+// Xenia has no scanout memory: the only way to get a frame on screen is to
+// drive the GPU primary ring buffer (VdInitializeRingBuffer + VdSwap +
+// writing CP_RB_WPTR), like D3D9 does. When running under Xenia (detected by
+// MmAllocatePhysicalMemoryEx returning a high address from the emulated
+// physical heap), screen_init() instead allocates a linear front buffer as
+// physical memory and screen_present() hands it to the GPU. See
+// samples/common/screen.c for the details.
+//
 // Pixel format
 // ------------
 // Pixels are 32bpp XRGB. The GPU reads each pixel as a little-endian dword,
@@ -52,6 +62,11 @@ typedef struct screen
     uint32_t tiles_per_row;          // ceil(pitch_pixels / 32), for tiled writes
     bool tiled;                      // whether text/shapes must use the swizzle
     bool active;                     // true once init succeeded
+    bool xenia;                      // true: running under Xenia (VdSwap path)
+    uint32_t xenia_fb_address;       // guest address of the front buffer (Xenia)
+    uint32_t xenia_ring_address;     // guest address of the primary ring buffer (Xenia)
+    uint32_t xenia_ring_wptr;        // ring buffer write index in dwords (Xenia)
+    uint32_t frame_count;            // frames presented (Xenia)
 } screen_t;
 
 // Maps the front buffer and fills in the video mode. Returns false (and
@@ -73,3 +88,8 @@ void screen_draw_char(const screen_t *screen, int x, int y,
 // Draws a NUL-terminated string of 8x8 glyphs, starting at (x, y).
 void screen_draw_string(const screen_t *screen, int x, int y,
                         uint32_t fg, uint32_t bg, const char *str);
+
+// Presents the front buffer. Under Xenia this enqueues a VdSwap packet in
+// the primary ring buffer and kicks CP_RB_WPTR; elsewhere it is a no-op
+// (the real GPU scans the buffer out on its own).
+void screen_present(screen_t *screen);

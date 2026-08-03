@@ -13,9 +13,16 @@
 
 void main(void)
 {
+    DbgPrint("main: enter");
+
     screen_t screen;
     if (!screen_init(&screen))
+    {
+        DbgPrint("main: screen_init failed");
         return; // could not map the front buffer; nothing else to do
+    }
+    DbgPrint("main: screen_init ok xenia=%d %ux%u", screen.xenia,
+             screen.width, screen.height);
 
     // Magenta everywhere.
     screen_clear(&screen, SCREEN_COLOR_MAGENTA);
@@ -31,7 +38,19 @@ void main(void)
     // Stay here. Returning would exit back to the dashboard.
     for (;;)
     {
-        int64_t interval = -10 * 1000 * 1000; // -10 ms (100ns units)
-        KeDelayExecutionThread(0, 0, &interval);
+        // Under Xenia the front buffer is not scanned out: keep handing the
+        // frame to the GPU instead. (The buffer keeps its contents, so the
+        // text drawn above stays on screen.)
+        if (screen.xenia)
+        {
+            screen_present(&screen);
+            int64_t interval = -16 * 1000 * 1000; // -16 ms (100ns units)
+            KeDelayExecutionThread(0, 0, &interval);
+        }
+        else
+        {
+            int64_t interval = -10 * 1000 * 1000; // -10 ms (100ns units)
+            KeDelayExecutionThread(0, 0, &interval);
+        }
     }
 }

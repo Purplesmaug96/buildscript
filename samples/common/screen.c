@@ -10,6 +10,35 @@
 #define ATI_INFO_PAGE_PHYS    0xEC806100u // "ATI info" page (libxenon: struct ati_info)
 #define ATI_INFO_PAGE_SIZE    0x00001000u
 
+// ---- Xenia guest-GPU presentation path -------------------------------------
+//
+// Xenia has no scanout memory; the only way to get a frame on screen is to
+// drive the GPU "primary ring buffer" the way D3D9 does:
+//
+//   1. allocate the front buffer and the ring buffer as physical memory
+//      (MmAllocatePhysicalMemoryEx, both land in the physical-backed heap);
+//   2. hand the ring buffer's *physical* address to VdInitializeRingBuffer;
+//   3. every frame, call VdSwap() at the current ring write position with a
+//      D3D9-style texture header fetch describing the front buffer, then
+//      write the new write pointer into CP_RB_WPTR (GPU register 0x01C5,
+//      guest MMIO address 0x7FC80714).
+//
+// Xenia's GPU command processor picks the packet up and presents the buffer.
+//
+// Detection: Xenia's MmAllocatePhysicalMemoryEx hands out addresses from the
+// vE0000000 physical heap (0xE0000000-0xFFD00000); real hardware RAM is
+// below 0x40000000. A secondary check (VdQueryRealVideoMode leaving the
+// mode zeroed) covers unusual builds.
+
+#define XENIA_PHYS_HEAP_BASE  0x80000000u // anything at/above this is an emulator heap
+#define XENIA_PAGE_READWRITE  0x00000004u // X_PAGE_READWRITE
+#define XENIA_RING_SIZE_LOG2  13u         // ring size = 1 << (size_log2 + 3) bytes
+#define XENIA_RING_BYTES      (1u << (XENIA_RING_SIZE_LOG2 + 3)) // 64 KiB
+#define XENIA_RING_DWORDS     (XENIA_RING_BYTES / 4)             // 16384
+#define XENIA_RING_BLOCK      64u         // dwords VdSwap consumes per call
+#define XENIA_CP_RB_WPTR      (*(volatile uint32_t *)0x7FC80714u)
+#define XENIA_TEXEL_ENDIANNESS 0          // fetch endianness field (0 = none, 2 = k8in32)
+
 // The info page layout, from libxenon's console driver:
 //   offset 0x00: reserved[4]
 //   offset 0x10: base   (front buffer physical address)
@@ -30,10 +59,107 @@ static bool valid_dimensions(uint32_t w, uint32_t h)
     return w >= 320 && w <= 2560 && h >= 200 && h <= 1600;
 }
 
+// Xenia hands out physical-backed memory from a high virtual heap; real
+// kernels return RAM below 0x40000000.
+static bool running_under_xenia(uint32_t fb_address)
+{
+    if (fb_address >= XENIA_PHYS_HEAP_BASE)
+        return true;
+
+    // Fallback: some builds leave the mode zeroed.
+    VIDEO_MODE mode;
+    memset(&mode, 0, sizeof(mode));
+    VdQueryRealVideoMode(&mode);
+    return mode.display_width == 0 && mode.display_height == 0;
+}
+
+// D3D9-style texture header fetch, laid out the way Xenia's
+// xe_gpu_texture_fetch_t expects after each dword is byte-swapped. The field
+// bit positions below are the host (little-endian) ones; the guest stores
+// each dword byte-swapped, as the GPU parses fetch constants as big-endian.
+typedef struct xenia_fetch
+{
+    uint32_t dword[6];
+} xenia_fetch_t;
+
+// Fills the fetch describing a linear 32bpp XRGB surface at fb_address.
+static void xenia_build_fetch(xenia_fetch_t *fetch, uint32_t fb_address,
+                              uint32_t width, uint32_t height)
+{
+    uint32_t pitch_bytes = width * 4; // must be 256-byte aligned (it is)
+
+    uint32_t host[6] = { 0, 0, 0, 0, 0, 0 };
+
+    // dword 0: type (2 = kTexture) at bits 0-1, pitch (bytes >> 5) at 22-30
+    host[0] = 2u | ((pitch_bytes >> 5) << 22);
+    // dword 1: format (0 = k_8_8_8_8) at bits 0-5, endianness at 6-7,
+    //           base address >> 12 at bits 12-31
+    host[1] = (XENIA_TEXEL_ENDIANNESS << 6) | ((fb_address >> 12) << 12);
+    // dword 2: size_2d: width-1 at bits 0-12, height-1 at bits 13-25
+    host[2] = (width - 1) | ((height - 1) << 13);
+    // dword 3: identity swizzle (R, G, B, A) at bits 1-12
+    host[3] = 0x688u << 1;
+    // dword 5: dimension (1 = k2DOrStacked) at bits 9-10
+    host[5] = 1u << 9;
+
+    for (int i = 0; i < 6; i++)
+        fetch->dword[i] = __builtin_bswap32(host[i]);
+}
+
+static bool xenia_init(screen_t *screen, const VIDEO_MODE *mode,
+                       void *fb, void *ring)
+{
+    screen->width = mode->display_width;
+    screen->height = mode->display_height;
+    screen->pitch_pixels = mode->display_width;
+    screen->tiles_per_row = (mode->display_width + 31) / 32;
+    screen->tiled = false; // xenia presents linear surfaces
+    screen->front_buffer = (volatile uint32_t *)fb;
+    screen->active = true;
+    screen->xenia = true;
+    screen->xenia_fb_address = (uint32_t)(uintptr_t)fb;
+    screen->xenia_ring_address = (uint32_t)(uintptr_t)ring;
+    screen->xenia_ring_wptr = 0;
+
+    // The ring buffer lives in physical memory; tell the GPU where it is.
+    uint32_t ring_phys = MmGetPhysicalAddress(ring);
+    DbgPrint("xenia_init: fb=0x%08x ring=0x%08x ring_phys=0x%08x w=%u h=%u",
+             screen->xenia_fb_address, screen->xenia_ring_address, ring_phys,
+             screen->width, screen->height);
+    VdInitializeRingBuffer((void *)(uintptr_t)ring_phys, XENIA_RING_SIZE_LOG2);
+
+    return true;
+}
+
 bool screen_init(screen_t *screen)
 {
     memset(screen, 0, sizeof(*screen));
+    DbgPrint("screen_init: enter");
 
+    VIDEO_MODE mode;
+    memset(&mode, 0, sizeof(mode));
+    VdQueryVideoMode(&mode);
+    DbgPrint("screen_init: mode=%ux%u", mode.display_width, mode.display_height);
+    if (!valid_dimensions(mode.display_width, mode.display_height))
+    {
+        mode.display_width = 1280;
+        mode.display_height = 720;
+    }
+
+    // Allocate the front buffer and ring on both targets first: the returned
+    // address doubles as the Xenia detector.
+    uint32_t fb_size = mode.display_width * mode.display_height * 4;
+    void *fb = MmAllocatePhysicalMemoryEx(REGION_AUTO, fb_size,
+                                          XENIA_PAGE_READWRITE, 0, 0xFFFFFFFFu, 0x1000);
+    void *ring = MmAllocatePhysicalMemoryEx(REGION_AUTO, XENIA_RING_BYTES,
+                                            XENIA_PAGE_READWRITE, 0, 0xFFFFFFFFu, 0x1000);
+    if (!fb || !ring)
+        return false;
+
+    if (running_under_xenia((uint32_t)(uintptr_t)fb))
+        return xenia_init(screen, &mode, fb, ring);
+
+    // ---- real hardware path ----------------------------------------------
     uint32_t fb_phys = FRONT_BUFFER_FALLBACK;
 
     // Try the ATI info page first: it holds the kernel's actual front buffer.
@@ -49,9 +175,6 @@ bool screen_init(screen_t *screen)
     // Fill in the mode from the kernel if we have not already.
     if (screen->width == 0 || screen->height == 0)
     {
-        VIDEO_MODE mode;
-        memset(&mode, 0, sizeof(mode));
-        VdQueryRealVideoMode(&mode);
         if (valid_dimensions(mode.display_width, mode.display_height))
         {
             screen->width = mode.display_width;
@@ -76,6 +199,19 @@ bool screen_init(screen_t *screen)
     return true;
 }
 
+// Under Xenia the GPU interprets the surface as 32bpp RGBA; make the pixel
+// fully opaque so the presenter never blends it away.
+static uint32_t xenia_color(const screen_t *screen, uint32_t color)
+{
+    if (!screen->xenia)
+        return color;
+    color |= 0xFFu;
+#if XENIA_TEXEL_ENDIANNESS == 2
+    color = __builtin_bswap32(color);
+#endif
+    return color;
+}
+
 void screen_clear(const screen_t *screen, uint32_t color)
 {
     if (!screen->active)
@@ -83,6 +219,7 @@ void screen_clear(const screen_t *screen, uint32_t color)
 
     volatile uint32_t *p = screen->front_buffer;
     const uint32_t total = screen->pitch_pixels * screen->height;
+    color = xenia_color(screen, color);
     for (uint32_t i = 0; i < total; i++)
         p[i] = color;
 }
@@ -113,7 +250,8 @@ void screen_put_pixel(const screen_t *screen, int x, int y, uint32_t color)
     if (screen->tiled)
         screen->front_buffer[tiled_index(screen, x, y)] = color;
     else
-        screen->front_buffer[(uint32_t)y * screen->pitch_pixels + (uint32_t)x] = color;
+        screen->front_buffer[(uint32_t)y * screen->pitch_pixels + (uint32_t)x] =
+            xenia_color(screen, color);
 }
 
 void screen_draw_char(const screen_t *screen, int x, int y,
@@ -140,4 +278,35 @@ void screen_draw_string(const screen_t *screen, int x, int y,
         x += 8;
         str++;
     }
+}
+
+void screen_present(screen_t *screen)
+{
+    if (!screen->active || !screen->xenia)
+        return;
+
+    uint32_t w = screen->width;
+    uint32_t h = screen->height;
+    uint32_t fb = screen->xenia_fb_address;
+    uint32_t format = 0; // XG_TEXTURE_FORMAT: k_8_8_8_8
+    uint32_t color_space = 0; // RGB
+    uint32_t dims[2] = { w, h };
+
+    xenia_fetch_t fetch;
+    xenia_build_fetch(&fetch, fb, w, h);
+
+    // The write pointer is a free-running dword counter; the GPU wraps it
+    // into the ring internally, so never mask it down to the ring size.
+    uint32_t block = screen->xenia_ring_wptr & (XENIA_RING_DWORDS - 1);
+    void *ring_slot = (void *)(uintptr_t)(screen->xenia_ring_address + block * 4);
+
+    VdSwap(ring_slot, &fetch, 0, 0, 0, &fb, &format, &color_space, &dims[0], &dims[1]);
+
+    screen->xenia_ring_wptr += XENIA_RING_BLOCK;
+    XENIA_CP_RB_WPTR = screen->xenia_ring_wptr;
+
+    screen->frame_count++;
+    if ((screen->frame_count % 120) == 0)
+        DbgPrint("present #%u wptr=%u", screen->frame_count,
+                 screen->xenia_ring_wptr);
 }
