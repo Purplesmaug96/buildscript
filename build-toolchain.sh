@@ -295,6 +295,9 @@ echo -e "${TOOLCHAIN_STEM}Newlib C library built and installed!"
 # We need to override the compiler checks, otherwise CMake will attempt to
 # build test programs, which won't work, as it'll try to link compiler-rt,
 # which is not yet installed.
+# LLVM package discovery is disabled, as compiler-rt would pick up the host's
+# LLVM (or its own LTO shared library from the build tree), which cannot be
+# imported on a target platform with no dynamic linking support.
 echo -e "${TOOLCHAIN_STEM}Configuring compiler-rt..."
 cmake -S "${SCRIPT_DIR}/llvm/compiler-rt" -B "${CRT_BUILD_DIR}" \
       -DCMAKE_INSTALL_PREFIX="${PREFIX}" \
@@ -319,6 +322,7 @@ cmake -S "${SCRIPT_DIR}/llvm/compiler-rt" -B "${CRT_BUILD_DIR}" \
       -DCOMPILER_RT_BUILTINS_ENABLE_PIC=false \
       -DCOMPILER_RT_BAREMETAL_BUILD=true \
       -DCOMPILER_RT_INCLUDE_TESTS=false \
+      -DCMAKE_DISABLE_FIND_PACKAGE_LLVM=true \
       -G "Ninja" >> "${BUILD_LOG}" 2>&1 || fail_build
 
 # Now build and install
