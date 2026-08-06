@@ -10,3 +10,6 @@
 [submodule "synthxex"]
 	path = synthxex
 	url = https://github.com/Purplesmaug96/SynthXEX.git
+[submodule "mesa"]
+	path = mesa
+	url = https://github.com/Purplesmaug96/Mesa.git
