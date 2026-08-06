@@ -21,7 +21,7 @@ private:
 
 static Counter g_counter(100); // global constructor must run before main()
 
-extern "C" void main(void)
+void main(void)
 {
     for (int i = 0; i < 5; i++)
     {
