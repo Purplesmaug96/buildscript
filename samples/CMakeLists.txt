@@ -19,5 +19,8 @@ add_subdirectory(magenta)
 add_subdirectory(fileio)
 add_subdirectory(threads)
 add_subdirectory(cpp)
+add_subdirectory(d3d9_magenta)
+add_subdirectory(d3d9_triangle)
+add_subdirectory(d3d9_cube)
 
 message(STATUS "OpenXeChain samples configured (sysroot: ${XECHAIN_SYSROOT})")

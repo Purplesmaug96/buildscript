@@ -1,48 +1,36 @@
-// Minimal framebuffer support for the Xbox 360, for OpenXeChain samples.
+// Minimal Direct3D-style presentation for the Xbox 360, for OpenXeChain
+// samples.
 //
-// This draws directly into the front buffer that the Xenos GPU is scanning
-// out, without going through the D3D/XAPI stack. Changes appear on screen
-// immediately; there is no VdSwap-style handshake involved.
+// The frame is a normal D3D9 k_8_8_8_8 (R8G8B8A8) 32bpp surface allocated in
+// physical memory and presented with the kernel's real VdSwap() call, exactly
+// the way a Direct3D 9 title presents. This works identically on real
+// hardware and under an emulator:
 //
-// Front buffer location
-// ---------------------
-// The scanout surface traditionally lives at physical 0x1E000000 (the same
-// base used by libxenon/Xell). We first try to read the real values from the
-// hardware's ATI info page at physical 0xEC806100 (mapped through
-// MmMapIoSpace), falling back to 0x1E000000 if the info page is not
-// maintained by the running kernel.
+//   * screen_init() allocates a frame buffer and a GPU command ring,
+//     then hands the ring's physical address to VdInitializeRingBuffer().
+//   * screen_present() builds a D3D9-style texture-header fetch describing
+//     the frame, runs it through VdSwap() at the current ring position and
+//     finally advances the GPU's command-ring write pointer (CP_RB_WPTR,
+//     register 0x01C5 at guest address 0x7FC80714).
 //
-// Xenia
-// -----
-// Xenia has no scanout memory: the only way to get a frame on screen is to
-// drive the GPU primary ring buffer (VdInitializeRingBuffer + VdSwap +
-// writing CP_RB_WPTR), like D3D9 does. When running under Xenia (detected by
-// MmAllocatePhysicalMemoryEx returning a high address from the emulated
-// physical heap), screen_init() instead allocates a linear front buffer as
-// physical memory and screen_present() hands it to the GPU. See
-// samples/common/screen.c for the details.
-//
-// Pixel format
-// ------------
-// Pixels are 32bpp XRGB. The GPU reads each pixel as a little-endian dword,
-// so on the big-endian PowerPC CPU the colour constants are byte-swapped:
-//   color = (B << 24) | (G << 16) | (R << 8)
-// (this matches libxenon's video code). E.g. magenta is 0xFF00FF00.
-//
-// Tiling
-// ------
-// Scanout surfaces are swizzled in 32x32-pixel tiles. A whole-screen fill
-// works with a plain linear write either way, but drawing shapes/text needs
-// the swizzle formula, which is what put_pixel() implements. Set
-// screen.tiled = false before drawing if the surface turns out to be linear.
+// There is deliberately no emulator-specific code: it is the standard Xbox
+// 360 presentation path.
 
 #pragma once
 
 #include <stdbool.h>
 #include <stdint.h>
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+// A presented k_8_8_8_8 texel is stored as four bytes R, G, B, A with R at the
+// lowest address. On this big-endian CPU a 32-bit word is therefore laid out
+// as (R << 24) | (G << 16) | (B << 8) | A (so D3DCOLOR_ARGB values need their
+// byte lanes swapped to match).
 #define SCREEN_COLOR_RGB(r, g, b) \
-    (((uint32_t)(b) << 24) | ((uint32_t)(g) << 16) | ((uint32_t)(r) << 8))
+    (((uint32_t)(r) << 24) | ((uint32_t)(g) << 16) | ((uint32_t)(b) << 8) | 0xFFu)
 
 #define SCREEN_COLOR_BLACK   SCREEN_COLOR_RGB(0x00, 0x00, 0x00)
 #define SCREEN_COLOR_WHITE   SCREEN_COLOR_RGB(0xFF, 0xFF, 0xFF)
@@ -55,33 +43,32 @@
 
 typedef struct screen
 {
-    volatile uint32_t *front_buffer; // virtual address of the mapped front buffer
+    volatile uint32_t *front_buffer; // guest virtual address of the frame
     uint32_t width;                  // visible width in pixels
     uint32_t height;                 // visible height in pixels
     uint32_t pitch_pixels;           // stride between rows in pixels
-    uint32_t tiles_per_row;          // ceil(pitch_pixels / 32), for tiled writes
-    bool tiled;                      // whether text/shapes must use the swizzle
+    uint32_t frame_address;          // front_buffer as a guest virtual address
+    uint32_t ring_address;           // guest virtual address of the command ring
+    uint32_t ring_wptr;              // free-running ring write pointer (dwords)
+    uint32_t frame_count;            // number of frames presented
     bool active;                     // true once init succeeded
-    bool xenia;                      // true: running under Xenia (VdSwap path)
-    uint32_t xenia_fb_address;       // guest address of the front buffer (Xenia)
-    uint32_t xenia_ring_address;     // guest address of the primary ring buffer (Xenia)
-    uint32_t xenia_ring_wptr;        // ring buffer write index in dwords (Xenia)
-    uint32_t frame_count;            // frames presented (Xenia)
 } screen_t;
 
-// Maps the front buffer and fills in the video mode. Returns false (and
-// leaves screen->active = false) if the buffer could not be mapped.
+// Allocates and presents the initial (black) frame. Returns false (and leaves
+// screen->active = false) if the buffers could not be set up.
 bool screen_init(screen_t *screen);
 
-// Fills the whole screen with a colour. Works for tiled and linear surfaces.
+// Presents the current frame contents. Call once per frame after drawing,
+// preferably at (or slower than) display refresh. No-op if init failed.
+void screen_present(screen_t *screen);
+
+// Fills the whole frame with a colour.
 void screen_clear(const screen_t *screen, uint32_t color);
 
 // Plots a single pixel at (x, y).
 void screen_put_pixel(const screen_t *screen, int x, int y, uint32_t color);
 
-// Draws one 8x8 glyph; the background colour is only written for pixels
-// inside the glyph's bounding box (set bg == SCREEN_COLOR_BLACK for a
-// transparent look on a black screen).
+// Draws one 8x8 glyph; pixels outside the glyph become bg.
 void screen_draw_char(const screen_t *screen, int x, int y,
                       uint32_t fg, uint32_t bg, char c);
 
@@ -89,7 +76,6 @@ void screen_draw_char(const screen_t *screen, int x, int y,
 void screen_draw_string(const screen_t *screen, int x, int y,
                         uint32_t fg, uint32_t bg, const char *str);
 
-// Presents the front buffer. Under Xenia this enqueues a VdSwap packet in
-// the primary ring buffer and kicks CP_RB_WPTR; elsewhere it is a no-op
-// (the real GPU scans the buffer out on its own).
-void screen_present(screen_t *screen);
+#ifdef __cplusplus
+} // extern "C"
+#endif

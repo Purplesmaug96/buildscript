@@ -7,16 +7,10 @@
 
 #include <stdio.h>
 
+#include <xecore/xboxkrnl.h>
+
 void main(void)
 {
-    printf("Hello, Xbox 360!\n");
-    printf("This was built with OpenXeChain.\n");
-    printf("int=%d hex=%x float=%.2f pointer=%p\n",
-           42, 0xCAFE, 3.14159, (void *)main);
-
-    unsigned long long big = 0x1122334455667788ULL;
-    printf("unsigned long long=%llu\n", big);
-
-    for (int i = 0; i < 5; i++)
-        printf("tick %d\n", i);
+    printf("Hello world! (printf)\n");
+	DbgPrint("Hello world! (DbgPrint)\n");
 }
