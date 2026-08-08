@@ -44,6 +44,28 @@ BadUpdate...) is required.
 | `fileio` | File I/O. Newlib stdio (`fopen`/`fwrite`/`fread`) and the raw XAM API (`CreateFileA`/`WriteFile`/`ReadFile`) on the hard drive. Needs an HDD (`Hdd:\`); results are reported via `printf`. |
 | `threads`| Kernel threads (`ExCreateThread`), delays (`KeDelayExecutionThread`) and the system clock (`KeQuerySystemTime`). |
 | `cpp`    | C++ without a C++ standard library. The sysroot ships no libc++, so use C headers (`<stdio.h>`) and plain C++ features; global constructors work via crt0's `__CTOR_LIST__`. |
+| `gl_magenta` | Real OpenGL. Creates an off-screen Mesa softpipe GL context (`xbox360_create`) and clears it to magenta with `glClearColor`/`glClear`, then blits the frame to the scanout surface. |
+| `gl_triangle` | OpenGL immediate mode: a white triangle via `glBegin(GL_TRIANGLES)`/`glVertex2f`/`glEnd` on the compatibility-profile context. |
+| `gl_cube` | Animated OpenGL: a spinning colour cube driven by `glRotatef`, `glFrustum` projection, depth testing and the kernel system timer. |
+
+### GL samples
+
+The `gl_*` samples need the Mesa xbox360 software backend, built from the
+bundled Mesa tree and installed into the sysroot:
+
+    cmake -B mesa/build-cross \
+        -DCMAKE_TOOLCHAIN_FILE=cmake/ppc-xbox360-toolchain.cmake \
+        -DCMAKE_INSTALL_PREFIX=<sysroot> \
+        -DMESA_OP_GALLIUM_DRIVERS="softpipe;xbox360" \
+        -DMESA_OP_GLX=disabled -DMESA_OP_EGL=OFF -DMESA_OP_LLVM=disabled \
+        -DMESA_OP_SPIRV_TOOLS=disabled -DMESA_OP_ZSTD=disabled
+    cmake --build mesa/build-cross --target xbox360
+    cmake --install mesa/build-cross
+
+This installs `libxbox360.a`, `GL/gl.h` and `xbox360/xbox360_api.h` into the
+sysroot; the GL samples are then picked up automatically by
+`samples/CMakeLists.txt`. Without it they are skipped and the other samples
+build unchanged.
 
 ## Writing your own programs
 

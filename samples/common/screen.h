@@ -93,3 +93,11 @@ void screen_draw_string(const screen_t *screen, int x, int y,
 // the primary ring buffer and kicks CP_RB_WPTR; elsewhere it is a no-op
 // (the real GPU scans the buffer out on its own).
 void screen_present(screen_t *screen);
+
+// Copies an off-screen render into the front buffer. `src` points at a
+// 32bpp BGRA8 (byte order B,G,R,A / softpipe PIPE_FORMAT_B8G8R8A8_UNORM)
+// image with `src_stride_bytes` per row; width/height come from
+// screen->width/height. Byte-swapping for the scanout format and the Xenia
+// RGBA8 fetch is handled here, so a GL frame can be moved straight in.
+void screen_blit_bgra(const screen_t *screen, const void *src,
+                      uint32_t src_stride_bytes);

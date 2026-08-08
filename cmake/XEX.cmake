@@ -49,7 +49,7 @@ function(openxechain_add_xex target)
 
     add_custom_command(TARGET "${target}" POST_BUILD
         COMMAND "${CMAKE_COMMAND}" -E env python3 "${OPENXECHAIN_XEX_DIR}/PatchDosHeader.py" $<TARGET_FILE:${target}>
-        COMMAND "${OPENXECHAIN_SYNTHXEX}" -i "$<TARGET_FILE:${target}>" -o "${xex_output}" ${type_args}
+        COMMAND "${OPENXECHAIN_SYNTHXEX}" -i "$<TARGET_FILE:${target}>" -o "${xex_output}" --quiet ${type_args}
         COMMAND "${CMAKE_COMMAND}" -E echo "Built ${xex_output}"
         VERBATIM)
 endfunction()

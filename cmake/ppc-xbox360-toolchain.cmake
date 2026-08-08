@@ -82,11 +82,20 @@ set(CMAKE_STRIP    "${XECHAIN_SYSROOT}/bin/llvm-strip"  CACHE FILEPATH "OpenXeCh
 set(CMAKE_TRY_COMPILE_TARGET_TYPE STATIC_LIBRARY)
 
 # Only ever search the sysroot for libraries/includes/packages; never the host.
-set(CMAKE_FIND_ROOT_PATH "${XECHAIN_SYSROOT}")
+set(CMAKE_FIND_ROOT_PATH
+    "${XECHAIN_SYSROOT}"
+    "${XECHAIN_SYSROOT}/ppc-xbox360")
 set(CMAKE_FIND_ROOT_PATH_MODE_PROGRAM NEVER)
 set(CMAKE_FIND_ROOT_PATH_MODE_LIBRARY ONLY)
 set(CMAKE_FIND_ROOT_PATH_MODE_INCLUDE ONLY)
 set(CMAKE_FIND_ROOT_PATH_MODE_PACKAGE ONLY)
+
+# Never let pkg-config see the host system's package database: the sysroot is
+# self-contained.  There are no .pc files in it yet, so host-only dependencies
+# (valgrind, libunwind, libdrm, X11, ...) are simply not found, which is the
+# desired cross-build behaviour - their headers must not leak into the target.
+set(ENV{PKG_CONFIG_LIBDIR} "${XECHAIN_SYSROOT}/ppc-xbox360/lib/pkgconfig")
+set(ENV{PKG_CONFIG_SYSROOT_DIR} "${XECHAIN_SYSROOT}")
 
 # --- Default flags ---------------------------------------------------------------
 

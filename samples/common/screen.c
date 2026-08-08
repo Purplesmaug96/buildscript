@@ -310,3 +310,35 @@ void screen_present(screen_t *screen)
         DbgPrint("present #%u wptr=%u", screen->frame_count,
                  screen->xenia_ring_wptr);
 }
+
+// Copies a 32bpp BGRA8 render target (byte order B,G,R,A, as produced by
+// Mesa softpipe's B8G8R8A8 surface) into the front buffer. The scanout
+// expects little-endian XRGB dwords, i.e. on the big-endian CPU the colour
+// constant is (B<<24)|(G<<16)|(R<<8); Xenia's presenter reads the surface as
+// RGBA8 instead, so the R and B bytes are swapped there.
+void screen_blit_bgra(const screen_t *screen, const void *src,
+                      uint32_t src_stride_bytes)
+{
+    if (!screen->active || !src)
+        return;
+
+    const uint8_t *row = (const uint8_t *)src;
+    for (uint32_t y = 0; y < screen->height; y++)
+    {
+        const uint8_t *p = row;
+        for (uint32_t x = 0; x < screen->width; x++)
+        {
+            uint8_t b = p[0], g = p[1], r = p[2], a = p[3];
+            uint32_t color;
+            if (screen->xenia)
+                color = ((uint32_t)r << 24) | ((uint32_t)g << 16) |
+                        ((uint32_t)b << 8) | 0xFFu;
+            else
+                color = ((uint32_t)b << 24) | ((uint32_t)g << 16) |
+                        ((uint32_t)r << 8) | ((uint32_t)a & 0xFFu);
+            screen_put_pixel(screen, (int)x, (int)y, color);
+            p += 4;
+        }
+        row += src_stride_bytes;
+    }
+}
