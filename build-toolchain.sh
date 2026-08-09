@@ -430,7 +430,8 @@ EOF
 
     # The unwinding stubs replace LLVM's libunwind: they compile with the
     # console toolchain without any configuration.
-    if [[ ! -f "${libunwind_lib}" ]]; then
+    if [[ ! -f "${libunwind_lib}" ]] ||
+       find "${SCRIPT_DIR}/unwind" -name '*.c' -newer "${libunwind_lib}" | grep -q .; then
         echo -e "${TOOLCHAIN_STEM}Building unwinding stubs..."
 
         "${PREFIX}/bin/clang" --target="${LLVM_TARGET}" \

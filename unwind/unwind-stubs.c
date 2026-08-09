@@ -11,6 +11,8 @@
 
 #include <stdint.h>
 
+#include <xecore/xboxkrnl.h>
+
 typedef void *_Unwind_Context;
 typedef struct _Unwind_Exception _Unwind_Exception;
 
@@ -37,6 +39,9 @@ struct _Unwind_Exception {
 _Unwind_Reason_Code _Unwind_RaiseException(_Unwind_Exception *e)
 {
   (void)e;
+  DbgPrint("_Unwine_RaiseException: C++ `throw` attempted (unwinding unsupported); "
+           "trap for diagnostics");
+  __asm__ __volatile__("tw 31, 0, 0");
   return _URC_END_OF_STACK;
 }
 
@@ -50,7 +55,14 @@ _Unwind_Reason_Code _Unwind_ForcedUnwind(_Unwind_Exception *e,
 
 void _Unwind_Resume(_Unwind_Exception *e)
 {
-  (void)e;
+  /* Real unwinding is unsupported on this platform.  This is a hard
+   * failure point: a C++ exception escaped into code that expects a
+   * handler, or terminate() was reached; either way the module cannot
+   * continue saneily.  Say so, distinctly, instead of spinning forever
+   * (the old silent loop made hangs indistinguishable from slow boots). */
+  DbgPrint("_Unwind_Resume: _Unwind_Resume: C++ exception escaping without a "
+           "matching handler");
+  __asm__ __volatile__("tw 31, 0, 0"); /* trap; Xenia logs the fault */
   for (;;) {
   }
 }
