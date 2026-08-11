@@ -40,12 +40,17 @@ void glsample_flip(glsample_t *s)
     if (!s->ok)
         return;
 
+    DbgPrint("glsample_flip: present...");
     xbox360_present(s->gl, &frame);
+    DbgPrint("glsample_flip: present done ptr=%08X", (uint32_t)(uintptr_t)frame.ptr);
     if (!frame.ptr)
         return;
 
+    DbgPrint("glsample_flip: blit...");
     screen_blit_bgra(&s->screen, frame.ptr, frame.stride);
+    DbgPrint("glsample_flip: blit done, present->screen...");
     screen_present(&s->screen);
+    DbgPrint("glsample_flip: screen_present done");
 }
 
 void glsample_wait(glsample_t *s)

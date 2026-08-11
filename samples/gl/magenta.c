@@ -21,8 +21,10 @@ void main(void)
 
     glClearColor(1.0f, 0.0f, 1.0f, 1.0f);
     glClear(GL_COLOR_BUFFER_BIT);
+    DbgPrint("gl_magenta: post-glClear");
 
     glsample_flip(&s);
+    DbgPrint("gl_magenta: post-flip");
 
     for (;;)
     {

@@ -653,6 +653,7 @@ build_mesa()
           -DMESA_OP_ZSTD=disabled \
           -DX360_RING_REV="${X360_RING_REV:-OFF}" \
           -DX360_RING_ROT="${X360_RING_ROT:-0}" \
+          -DX360_CPU_PROBE_VSX="${X360_CPU_PROBE_VSX:-ON}" \
           -G "Ninja" >> "${BUILD_LOG}" 2>&1 || fail_build
 
     # Build and install

@@ -74,9 +74,11 @@ static bool running_under_xenia(uint32_t fb_address)
 }
 
 // D3D9-style texture header fetch, laid out the way Xenia's
-// xe_gpu_texture_fetch_t expects after each dword is byte-swapped. The field
-// bit positions below are the host (little-endian) ones; the guest stores
-// each dword byte-swapped, as the GPU parses fetch constants as big-endian.
+// xe_gpu_texture_fetch_t expects. The field bit positions below are the host
+// (little-endian) ones; the guest is big-endian, so it stores each dword in
+// native (big-endian) byte order. Xenia's VdSwap copies the fetch with
+// copy_and_swap_32_unaligned, which byte-swaps each dword BE->LE, so storing
+// anything else (e.g. a pre-swapped dword) would double-swap the fields.
 typedef struct xenia_fetch
 {
     uint32_t dword[6];
@@ -86,15 +88,18 @@ typedef struct xenia_fetch
 static void xenia_build_fetch(xenia_fetch_t *fetch, uint32_t fb_address,
                               uint32_t width, uint32_t height)
 {
-    uint32_t pitch_bytes = width * 4; // must be 256-byte aligned (it is)
+    uint32_t pitch_bytes = width * 4; // 1280x720 32bpp: 5120 bytes/row, 256-aligned
 
     uint32_t host[6] = { 0, 0, 0, 0, 0, 0 };
 
-    // dword 0: type (2 = kTexture) at bits 0-1, pitch (bytes >> 5) at 22-30
-    host[0] = 2u | ((pitch_bytes >> 5) << 22);
-    // dword 1: format (0 = k_8_8_8_8) at bits 0-5, endianness at 6-7,
-    //           base address >> 12 at bits 12-31
-    host[1] = (XENIA_TEXEL_ENDIANNESS << 6) | ((fb_address >> 12) << 12);
+    // dword 0: type (2 = kTexture) at bits 0-1, pitch at 22-30. Xenia reads
+    // the pitch field as texels >> 5 (pixels per 32-texel row), so 1280 wide
+    // -> 40, and derives the byte pitch from it (like real games' D3D9
+    // headers). Bytes>>5 (160) would make Xenia think rows are 4x too wide.
+    host[0] = 2u | ((width >> 5) << 22);
+    // dword 1: format (6 = k_8_8_8_8, xenos TextureFormat) at bits 0-5,
+    //           endianness at 6-7, base address >> 12 at bits 12-31
+    host[1] = (6 /* k_8_8_8_8 */ << 0) | (XENIA_TEXEL_ENDIANNESS << 6) | ((fb_address >> 12) << 12);
     // dword 2: size_2d: width-1 at bits 0-12, height-1 at bits 13-25
     host[2] = (width - 1) | ((height - 1) << 13);
     // dword 3: identity swizzle (R, G, B, A) at bits 1-12
@@ -103,7 +108,7 @@ static void xenia_build_fetch(xenia_fetch_t *fetch, uint32_t fb_address,
     host[5] = 1u << 9;
 
     for (int i = 0; i < 6; i++)
-        fetch->dword[i] = __builtin_bswap32(host[i]);
+        fetch->dword[i] = host[i];
 }
 
 static bool xenia_init(screen_t *screen, const VIDEO_MODE *mode,
@@ -288,7 +293,7 @@ void screen_present(screen_t *screen)
     uint32_t w = screen->width;
     uint32_t h = screen->height;
     uint32_t fb = screen->xenia_fb_address;
-    uint32_t format = 0; // XG_TEXTURE_FORMAT: k_8_8_8_8
+    uint32_t format = 6; // xenos TextureFormat: k_8_8_8_8
     uint32_t color_space = 0; // RGB
     uint32_t dims[2] = { w, h };
 
@@ -300,10 +305,14 @@ void screen_present(screen_t *screen)
     uint32_t block = screen->xenia_ring_wptr & (XENIA_RING_DWORDS - 1);
     void *ring_slot = (void *)(uintptr_t)(screen->xenia_ring_address + block * 4);
 
+    DbgPrint("screen_present: VdSwap in block=%u", block);
     VdSwap(ring_slot, &fetch, 0, 0, 0, &fb, &format, &color_space, &dims[0], &dims[1]);
+    DbgPrint("screen_present: VdSwap out");
 
     screen->xenia_ring_wptr += XENIA_RING_BLOCK;
     XENIA_CP_RB_WPTR = screen->xenia_ring_wptr;
+
+    DbgPrint("screen_present: wptr=%u", screen->xenia_ring_wptr);
 
     screen->frame_count++;
     if ((screen->frame_count % 120) == 0)
