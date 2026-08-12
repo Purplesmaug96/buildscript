@@ -19,13 +19,20 @@ void main(void)
 
     glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
     glClear(GL_COLOR_BUFFER_BIT);
+    DbgPrint("gl_triangle: cleared");
 
     glColor3f(1.0f, 1.0f, 1.0f);
+    DbgPrint("gl_triangle: begin");
     glBegin(GL_TRIANGLES);
+    DbgPrint("gl_triangle: v0");
     glVertex2f(-1.0f, -1.0f);
+    DbgPrint("gl_triangle: v1");
     glVertex2f(1.0f, -1.0f);
+    DbgPrint("gl_triangle: v2");
     glVertex2f(0.0f, 1.0f);
+    DbgPrint("gl_triangle: end");
     glEnd();
+    DbgPrint("gl_triangle: drawn");
 
     glsample_flip(&s);
 
