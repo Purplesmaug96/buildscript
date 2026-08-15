@@ -657,9 +657,9 @@ build_mesa()
           -G "Ninja" >> "${BUILD_LOG}" 2>&1 || fail_build
 
     # Build and install
-    echo -e "${TOOLCHAIN_STEM}Building Mesa (xbox360 backend)..."
+    echo -e "${TOOLCHAIN_STEM}Building Mesa..."
     cmake --build "${MESA_BUILD_DIR}" --target xbox360_merged -- -j"${PARALLEL}" >> "${BUILD_LOG}" 2>&1 || fail_build
-    echo -e "${TOOLCHAIN_STEM}Installing Mesa (xbox360 backend)..."
+    echo -e "${TOOLCHAIN_STEM}Installing Mesa..."
     cmake --install "${MESA_BUILD_DIR}" >> "${BUILD_LOG}" 2>&1 || fail_build
 
     echo -e "${TOOLCHAIN_STEM}Mesa built and installed!"
