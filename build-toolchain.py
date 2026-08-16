@@ -45,9 +45,70 @@ ALL_COMPONENTS = ["llvm", "xecorelib", "newlib", "crt", "libcxx", "pthread", "sy
 def xe_print(string, end="\n"):
 	print(f"{TOOLCHAIN_STEM} {string}", end=end)
 
+def run_cmd(cmd, quiet=False):
+	if not quiet:
+		xe_print(f"Running command: {cmd}")
+	os.system(cmd)
+
 def build_component_llvm() -> int:
-	xe_print(f"{ANSI_RED}ERROR: Unimplemented{ANSI_CLEAR}")
-	return 1
+	xe_print("Building the cross compiler... (this may take a while)")
+	LLVM_CMAKE_ARGS = f"""
+-DCMAKE_C_COMPILER=\"{HOST_CC}\"
+-DCMAKE_CXX_COMPILER=\"{HOST_CXX}\"
+-DCMAKE_BUILD_TYPE=\"{BUILD_TYPE}\"
+-DCMAKE_INSTALL_PREFIX=\"{PREFIX}\"
+-DLLVM_ENABLE_PROJECTS=\"lld;clang\"
+-DLLVM_TARGETS_TO_BUILD=PowerPC
+-DLLVM_DEFAULT_TARGET_TRIPLE=\"{LLVM_TARGET}\"
+-DLLVM_INSTALL_BINUTILS_SYMLINKS=true
+-DLLVM_INSTALL_CCTOOLS_SYMLINKS=true
+-DLLVM_INSTALL_TOOLCHAIN_ONLY=true
+-DLLVM_INCLUDE_TESTS=false
+-DLLVM_INCLUDE_BENCHMARKS=false
+-DLLVM_INCLUDE_EXAMPLES=false
+-DLLVM_INCLUDE_DOCS=false
+-DLLVM_OPTIMIZED_TABLEGEN=true
+-DLLVM_PARALLEL_LINK_JOBS=\"{LLVM_LINK_JOBS}\"
+-DCLANG_ENABLE_STATIC_ANALYZER=false
+-DCLANG_ENABLE_ARCMT=false
+-G "Ninja"
+    """.replace('\n', ' ').strip()
+
+	# TODO: Port ccache check from build-toolchain.sh
+
+	# TODO: Port lld check from build-toolchain.sh
+
+	run_cmd(f"cmake -S ./llvm/llvm -B {LLVM_BUILD_DIR} {LLVM_CMAKE_ARGS}")
+
+	xe_print("Building the cross compiler... (this may take a WHILE)")
+	run_cmd(f"cmake --build {LLVM_BUILD_DIR} -j{PARALLEL}")
+
+	xe_print("Installing the cross compiler... (this may take a while)")
+	run_cmd(f"cmake --install {LLVM_BUILD_DIR}")
+
+	xe_print("Cross compiler built and installed!")
+
+	xe_print("Writing initial Clang configuration scripts...")
+
+	with open(f"{PREFIX}/bin/clang.cfg", "w", encoding="utf-8") as f:
+		f.write("""
+-Wno-main-return-type\n
+--sysroot=<CFGDIR>/..\n
+--rtlib=compiler-rt\n
+-fdeclspec\n
+-mlongcall\n
+		""")
+
+	with open(f"{PREFIX}/bin/clang++.cfg", "w", encoding="utf-8") as f:
+		f.write("""
+-Wno-main-return-type\n
+--sysroot=<CFGDIR>/..\n
+--rtlib=compiler-rt\n
+-fdeclspec\n
+-mlongcall\n
+		""")
+
+	return 0
 
 def build_component_xecorelib() -> int:
 	xe_print(f"{ANSI_RED}ERROR: Unimplemented{ANSI_CLEAR}")
