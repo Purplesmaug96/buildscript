@@ -34,6 +34,8 @@ void main(void)
     glEnd();
     DbgPrint("gl_triangle: drawn");
 
+    DbgPrint("gl_triangle: probe written");
+
     glsample_flip(&s);
 
     for (;;)
