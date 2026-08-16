@@ -17,8 +17,25 @@ TOOLCHAIN_STEM = f"{ANSI_GREEN}{TOOLCHAIN_NAME}{ANSI_CLEAR}>"
 # This script can be run from any directory
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 
+# Windows lacks a POSIX shell for the autotools/script components, and cmd.exe
+# has different quoting rules, so commands are run through bash (Git Bash /
+# MSYS2) when it is available.  Paths are normalised to forward slashes,
+# which all the tools involved (clang, cmake, ninja, make, bash) accept.
+IS_WINDOWS = os.name == "nt"
+
+def norm_path(path):
+	return path.replace("\\", "/") if IS_WINDOWS else path
+
+if IS_WINDOWS:
+	try:
+		import ctypes
+		kernel32 = ctypes.windll.kernel32
+		kernel32.SetConsoleMode(kernel32.GetStdHandle(-11), 7)
+	except Exception:
+		pass
+
 # User-configurable variables (environment variables override these)
-PREFIX = os.path.realpath(os.environ.get("PREFIX", f"{SCRIPT_DIR}/sysroot")) # Sysroot for the toolchain to be installed into
+PREFIX = norm_path(os.path.realpath(os.environ.get("PREFIX", f"{SCRIPT_DIR}/sysroot"))) # Sysroot for the toolchain to be installed into
 HOST_CC = os.environ.get("HOST_CC", "clang") # Host compiler to use (MUST BE CLANG)
 HOST_CXX = os.environ.get("HOST_CXX", "clang++")
 BUILD_TYPE = os.environ.get("BUILD_TYPE", "Release") # Debug level to build LLVM in
@@ -50,9 +67,11 @@ MESA_BUILD_DIR = f"{BUILD_DIR}/mesa"
 # Build log path
 BUILD_LOG = f"{SCRIPT_DIR}/build.log"
 with open(BUILD_LOG, "w", encoding="utf-8") as _log:
-    pass  # Delete the old logs, if they exist
+	pass  # Delete the old logs, if they exist
 
 ALL_COMPONENTS = ["llvm", "xecorelib", "newlib", "crt", "libcxx", "pthread", "synthxex", "mesa"]
+
+BASH = shutil.which("bash")
 
 def xe_print(string, end="\n"):
 	print(f"{TOOLCHAIN_STEM} {string}", end=end)
@@ -64,7 +83,11 @@ def fail_build():
 def run_cmd(cmd, cwd=None, quiet=False, check=True):
 	if not quiet:
 		xe_print(f"Running command: {cmd}")
-	ret = subprocess.call(cmd, cwd=cwd, shell=True)
+	if IS_WINDOWS and BASH is not None:
+		# Run through bash so quoting/glob semantics match a POSIX shell.
+		ret = subprocess.call([BASH, "-lc", cmd], cwd=cwd)
+	else:
+		ret = subprocess.call(cmd, cwd=cwd, shell=True)
 	if check and ret != 0:
 		fail_build()
 	return ret
@@ -100,8 +123,19 @@ def restore_cross_env():
 # Check to make sure all required dependencies are installed
 def check_deps() -> bool:
 	missing = 0
-	for tool in ["clang", "ar", "git", "cmake", "make", "ninja", "python3", "bash",
-	             "bzip2", "gzip", "grep", "xargs", "sed", "tar", "unzip", "zip", "gawk"]:
+	# On Windows the POSIX-side tools (make, tar, gawk, ...) come from Git
+	# Bash/MSYS2, which this script requires anyway (xecorelib/newlib run
+	# shell scripts).  Only enforce the tools that are needed everywhere.
+	required = ["clang", "ar", "git", "cmake", "make", "ninja", "bash"]
+	if not IS_WINDOWS:
+		required = ["clang", "ar", "git", "cmake", "make", "ninja", "python3", "bash",
+		            "bzip2", "gzip", "grep", "xargs", "sed", "tar", "unzip", "zip", "gawk"]
+
+	if IS_WINDOWS and BASH is None:
+		print(f"{TOOLCHAIN_STEM}{ANSI_RED}bash not found on PATH - install Git Bash or MSYS2{ANSI_CLEAR}")
+		missing = 1
+
+	for tool in required:
 		if shutil.which(tool) is None:
 			missing = 1
 			print(f"{TOOLCHAIN_STEM}{ANSI_RED}Missing {tool}!{ANSI_CLEAR}")
@@ -437,7 +471,7 @@ def setup_libcxx() -> int:
 	# race with the install step on this fast machine.  Generate it up front
 	# if it is missing.
 	if not os.path.exists(f"{LIBCXX_BUILD_DIR}/include/c++/v1/libcxx.imp"):
-		run_cmd(f"python3 \"{SCRIPT_DIR}/llvm/libcxx/utils/generate_iwyu_mapping.py\" "
+		run_cmd(f"\"{sys.executable}\" \"{SCRIPT_DIR}/llvm/libcxx/utils/generate_iwyu_mapping.py\" "
 		        f"-o \"{LIBCXX_BUILD_DIR}/include/c++/v1/libcxx.imp\"")
 
 	run_cmd(f"cmake --install {LIBCXX_BUILD_DIR}")
