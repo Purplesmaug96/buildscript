@@ -51,7 +51,7 @@ def run_cmd(cmd, quiet=False):
 	os.system(cmd)
 
 def build_component_llvm() -> int:
-	xe_print("Building the cross compiler... (this may take a while)")
+	xe_print("Building LLVM... (this may take a while)")
 	LLVM_CMAKE_ARGS = f"""
 -DCMAKE_C_COMPILER=\"{HOST_CC}\"
 -DCMAKE_CXX_COMPILER=\"{HOST_CXX}\"
@@ -80,10 +80,10 @@ def build_component_llvm() -> int:
 
 	run_cmd(f"cmake -S ./llvm/llvm -B {LLVM_BUILD_DIR} {LLVM_CMAKE_ARGS}")
 
-	xe_print("Building the cross compiler... (this may take a WHILE)")
+	xe_print("Building LLVM... (this may take a WHILE)")
 	run_cmd(f"cmake --build {LLVM_BUILD_DIR} -j{PARALLEL}")
 
-	xe_print("Installing the cross compiler... (this may take a while)")
+	xe_print("Installing LLVM... (this may take a while)")
 	run_cmd(f"cmake --install {LLVM_BUILD_DIR}")
 
 	xe_print("Cross compiler built and installed!")
@@ -111,8 +111,15 @@ def build_component_llvm() -> int:
 	return 0
 
 def build_component_xecorelib() -> int:
-	xe_print(f"{ANSI_RED}ERROR: Unimplemented{ANSI_CLEAR}")
-	return 1
+	if sys.platform == "linux":
+		# Run the xecorelib build script
+		run_cmd(f"PREFIX=\"{PREFIX}\" bash \"./xecorelib/install.sh\"")
+		# Also install to a staging directory, to build Newlib with it
+		run_cmd(f"BINDIR=\"{PREFIX}/bin\" PREFIX=\"{XECORELIB_STAGE_DIR}\" bash \"./xecorelib/install.sh\"")
+	else:
+		xe_print(f"{ANSI_RED}Unsupported host platform{ANSI_CLEAR}")
+		return 1
+	return 0
 
 def build_component_newlib() -> int:
 	xe_print(f"{ANSI_RED}ERROR: Unimplemented{ANSI_CLEAR}")
