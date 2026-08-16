@@ -117,7 +117,7 @@ def build_component_xecorelib() -> int:
 		# Also install to a staging directory, to build Newlib with it
 		run_cmd(f"BINDIR=\"{PREFIX}/bin\" PREFIX=\"{XECORELIB_STAGE_DIR}\" bash \"./xecorelib/install.sh\"")
 	else:
-		xe_print(f"{ANSI_RED}Unsupported host platform{ANSI_CLEAR}")
+		xe_print(f"{ANSI_RED}ERROR: Unsupported host platform{ANSI_CLEAR}")
 		return 1
 	return 0
 
@@ -163,7 +163,7 @@ def build_component(component) -> int:
 	elif component == "mesa":
 		return build_component_mesa()
 	else:
-		xe_print(f"{ANSI_RED}Invalid component \"{component}\"{ANSI_CLEAR}")
+		xe_print(f"{ANSI_RED}ERROR: Invalid component \"{component}\"{ANSI_CLEAR}")
 		return 1
 
 def main(argv, argc) -> int:
@@ -180,7 +180,7 @@ def main(argv, argc) -> int:
 			if arg in ALL_COMPONENTS:
 				COMPONENTS.append(arg)
 			else:
-				xe_print(f"{ANSI_RED}Invalid component \"{arg}\"{ANSI_CLEAR}")
+				xe_print(f"{ANSI_RED}ERROR: Invalid component \"{arg}\"{ANSI_CLEAR}")
 				return 1
 
 	xe_print(f"Targets: ", end="")
@@ -194,7 +194,7 @@ def main(argv, argc) -> int:
 		xe_print(f"Building {component}...")
 		ret = build_component(component)
 		if ret != 0:
-			xe_print(f"{ANSI_RED}build_component for {component} returned {ret} {ANSI_CLEAR}")
+			xe_print(f"{ANSI_RED}ERROR: build_component for {component} returned {ret} {ANSI_CLEAR}")
 			return ret
 
 
