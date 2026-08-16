@@ -156,7 +156,7 @@ def build_component(component) -> int:
 	elif component == "mesa":
 		return build_component_mesa()
 	else:
-		xe_print(f"{ANSI_RED}Invalid component \"{arg}\"{ANSI_CLEAR}")
+		xe_print(f"{ANSI_RED}Invalid component \"{component}\"{ANSI_CLEAR}")
 		return 1
 
 def main(argv, argc) -> int:
@@ -171,7 +171,7 @@ def main(argv, argc) -> int:
 		for arg in argv:
 			if arg == argv[0]: continue
 			if arg in ALL_COMPONENTS:
-				COMPONENTS.append(argv)
+				COMPONENTS.append(arg)
 			else:
 				xe_print(f"{ANSI_RED}Invalid component \"{arg}\"{ANSI_CLEAR}")
 				return 1
