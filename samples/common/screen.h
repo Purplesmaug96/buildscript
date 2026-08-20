@@ -53,6 +53,8 @@
 #define SCREEN_COLOR_CYAN    SCREEN_COLOR_RGB(0x00, 0xFF, 0xFF)
 #define SCREEN_COLOR_MAGENTA SCREEN_COLOR_RGB(0xFF, 0x00, 0xFF)
 
+#define XENIA_RING_SIZE_LOG2  13u         // ring size = 1 << (size_log2 + 3) bytes
+
 typedef struct screen
 {
     volatile uint32_t *front_buffer; // virtual address of the mapped front buffer
@@ -96,8 +98,11 @@ void screen_present(screen_t *screen);
 
 // Copies an off-screen render into the front buffer. `src` points at a
 // 32bpp BGRA8 (byte order B,G,R,A / softpipe PIPE_FORMAT_B8G8R8A8_UNORM)
-// image with `src_stride_bytes` per row; width/height come from
-// screen->width/height. Byte-swapping for the scanout format and the Xenia
-// RGBA8 fetch is handled here, so a GL frame can be moved straight in.
+// image with `src_stride_bytes` per row, of size src_w × src_h, copied into
+// the front buffer. If src_w/src_h differ from the screen size, the copy is
+// an integer nearest-neighbour upscale. Byte-swapping for the scanout
+// format and the Xenia RGBA8 fetch is handled here, so a GL frame can be
+// moved straight in.
 void screen_blit_bgra(const screen_t *screen, const void *src,
-                      uint32_t src_stride_bytes);
+                      uint32_t src_stride_bytes, uint32_t src_w,
+                      uint32_t src_h);

@@ -32,7 +32,6 @@
 
 #define XENIA_PHYS_HEAP_BASE  0x80000000u // anything at/above this is an emulator heap
 #define XENIA_PAGE_READWRITE  0x00000004u // X_PAGE_READWRITE
-#define XENIA_RING_SIZE_LOG2  13u         // ring size = 1 << (size_log2 + 3) bytes
 #define XENIA_RING_BYTES      (1u << (XENIA_RING_SIZE_LOG2 + 3)) // 64 KiB
 #define XENIA_RING_DWORDS     (XENIA_RING_BYTES / 4)             // 16384
 #define XENIA_RING_BLOCK      64u         // dwords VdSwap consumes per call
@@ -305,14 +304,10 @@ void screen_present(screen_t *screen)
     uint32_t block = screen->xenia_ring_wptr & (XENIA_RING_DWORDS - 1);
     void *ring_slot = (void *)(uintptr_t)(screen->xenia_ring_address + block * 4);
 
-    DbgPrint("screen_present: VdSwap in block=%u", block);
     VdSwap(ring_slot, &fetch, 0, 0, 0, &fb, &format, &color_space, &dims[0], &dims[1]);
-    DbgPrint("screen_present: VdSwap out");
 
     screen->xenia_ring_wptr += XENIA_RING_BLOCK;
     XENIA_CP_RB_WPTR = screen->xenia_ring_wptr;
-
-    DbgPrint("screen_present: wptr=%u", screen->xenia_ring_wptr);
 
     screen->frame_count++;
     if ((screen->frame_count % 120) == 0)
@@ -325,29 +320,49 @@ void screen_present(screen_t *screen)
 // expects little-endian XRGB dwords, i.e. on the big-endian CPU the colour
 // constant is (B<<24)|(G<<16)|(R<<8); Xenia's presenter reads the surface as
 // RGBA8 instead, so the R and B bytes are swapped there.
+// If src_w/src_h differ from the front buffer, the copy is an integer
+// nearest-neighbour upscale.
 void screen_blit_bgra(const screen_t *screen, const void *src,
-                      uint32_t src_stride_bytes)
+                      uint32_t src_stride_bytes, uint32_t src_w,
+                      uint32_t src_h)
 {
     if (!screen->active || !src)
         return;
 
-    const uint8_t *row = (const uint8_t *)src;
+    const uint32_t *src32 = (const uint32_t *)src;
+    uint32_t *dst = screen->front_buffer;
+    uint32_t dst_pitch = screen->pitch_pixels;
+
     for (uint32_t y = 0; y < screen->height; y++)
     {
-        const uint8_t *p = row;
-        for (uint32_t x = 0; x < screen->width; x++)
+        uint32_t sy = (src_h == screen->height) ? y
+                                                : (y * src_h) / screen->height;
+        const uint32_t *srow = src32 + (sy * (src_stride_bytes / 4));
+        uint32_t *drow = dst + y * dst_pitch;
+
+        if (src_w == screen->width)
         {
-            uint8_t b = p[0], g = p[1], r = p[2], a = p[3];
-            uint32_t color;
-            if (screen->xenia)
-                color = ((uint32_t)r << 24) | ((uint32_t)g << 16) |
-                        ((uint32_t)b << 8) | 0xFFu;
-            else
-                color = ((uint32_t)b << 24) | ((uint32_t)g << 16) |
-                        ((uint32_t)r << 8) | ((uint32_t)a & 0xFFu);
-            screen_put_pixel(screen, (int)x, (int)y, color);
-            p += 4;
+            for (uint32_t x = 0; x < screen->width; x++)
+            {
+                uint32_t c = srow[x];
+                if (screen->xenia)
+                    drow[x] = (c << 8) | 0xFFu;
+                else
+                    drow[x] = ((c & 0xFFu) << 24) | ((c & 0xFF00u) << 8) |
+                              ((c & 0xFF0000u) >> 8) | (c >> 24);
+            }
         }
-        row += src_stride_bytes;
+        else
+        {
+            for (uint32_t x = 0; x < screen->width; x++)
+            {
+                uint32_t c = srow[(x * src_w) / screen->width];
+                if (screen->xenia)
+                    drow[x] = (c << 8) | 0xFFu;
+                else
+                    drow[x] = ((c & 0xFFu) << 24) | ((c & 0xFF00u) << 8) |
+                              ((c & 0xFF0000u) >> 8) | (c >> 24);
+            }
+        }
     }
 }

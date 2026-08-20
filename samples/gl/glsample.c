@@ -7,6 +7,8 @@
 
 #include "glsample.h"
 
+/* gpu/xenos_gpu.c — PM4 ring verification hook (installed header pending). */
+
 bool glsample_init(glsample_t *s)
 {
     s->ok = false;
@@ -20,7 +22,7 @@ bool glsample_init(glsample_t *s)
     DbgPrint("glsample: screen %ux%u (xenia=%d)", s->screen.width,
              s->screen.height, s->screen.xenia);
 
-    if (!xbox360_create(&s->gl, s->screen.width, s->screen.height))
+    if (!xbox360_create(&s->gl, s->screen.width / 3, s->screen.height / 3))
     {
         DbgPrint("glsample: xbox360_create failed");
         return false;
@@ -28,6 +30,21 @@ bool glsample_init(glsample_t *s)
     xbox360_make_current(s->gl);
     DbgPrint("glsample: GL context ready (%ux%u)", s->screen.width,
              s->screen.height);
+
+    if (s->screen.xenia && s->screen.xenia_ring_address)
+    {
+        int r = xe_gpu_dev_verify(s->screen.xenia_ring_address,
+                                  XENIA_RING_SIZE_LOG2,
+                                  s->screen.xenia_ring_wptr);
+        DbgPrint("gpu: PM4 dev verify %s", r == 0 ? "OK" : "FAIL");
+        if (r == 0)
+        {
+            r = xe_gpu_dev_triangle(s->screen.xenia_ring_address,
+                                    XENIA_RING_SIZE_LOG2,
+                                    s->screen.xenia_ring_wptr);
+            DbgPrint("gpu: PM4 first draw submitted %s", r == 0 ? "OK" : "FAIL");
+        }
+    }
 
     s->ok = true;
     return true;
@@ -40,21 +57,17 @@ void glsample_flip(glsample_t *s)
     if (!s->ok)
         return;
 
-    DbgPrint("glsample_flip: present...");
     xbox360_present(s->gl, &frame);
-    DbgPrint("glsample_flip: present done ptr=%08X", (uint32_t)(uintptr_t)frame.ptr);
     if (!frame.ptr)
         return;
 
-    DbgPrint("glsample_flip: blit...");
-    screen_blit_bgra(&s->screen, frame.ptr, frame.stride);
-    DbgPrint("glsample_flip: blit done, present->screen...");
+    screen_blit_bgra(&s->screen, frame.ptr, frame.stride, frame.width,
+                     frame.height);
     screen_present(&s->screen);
-    DbgPrint("glsample_flip: screen_present done");
 }
 
 void glsample_wait(glsample_t *s)
 {
-    int64_t interval = s->screen.xenia ? -16 * 1000000 : -10 * 1000000;
+    int64_t interval = s->screen.xenia ? -16 * 10000 : -10 * 10000;
     KeDelayExecutionThread(0, 0, &interval);
 }

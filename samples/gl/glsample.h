@@ -30,3 +30,9 @@ void glsample_flip(glsample_t *s);
 
 // Pauses for one frame period (16 ms under Xenia, 10 ms on hardware).
 void glsample_wait(glsample_t *s);
+
+// PM4 ring verification / first-draw smoke test hooks (xenos_gpu.c).
+int xe_gpu_dev_verify(uint32_t ring_va, uint32_t size_log2,
+                      uint32_t start_wptr);
+int xe_gpu_dev_triangle(uint32_t ring_va, uint32_t size_log2,
+                        uint32_t start_wptr);
