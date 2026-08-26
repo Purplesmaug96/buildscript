@@ -34,6 +34,7 @@ find_path(XECHAIN_XBOX360_GL_INCLUDE
     HINTS "${XECHAIN_SYSROOT}/include" "${XECHAIN_SYSROOT}/ppc-xbox360/include")
 if(XECHAIN_XBOX360_GL_LIBRARY AND XECHAIN_XBOX360_GL_INCLUDE)
     add_subdirectory(gl)
+    add_subdirectory(gpu)
     message(STATUS "OpenXeChain GL samples enabled (xbox360 backend found)")
 else()
     message(STATUS "OpenXeChain GL samples skipped (xbox360 backend not installed; "
