@@ -69,6 +69,13 @@ typedef struct screen
     uint32_t xenia_ring_address;     // guest address of the primary ring buffer (Xenia)
     uint32_t xenia_ring_wptr;        // ring buffer write index in dwords (Xenia)
     uint32_t frame_count;            // frames presented (Xenia)
+    // Optional GPU-present source override: when present_base is nonzero,
+    // VdSwap presents this physical surface instead of the front buffer
+    // (e.g. a tiled resolve destination written by the GPU).
+    uint32_t present_base;           // physical address, 0 = front buffer
+    uint32_t present_w;
+    uint32_t present_h;
+    volatile uint32_t *xenia_rptr_page; // CP read-pointer writeback (Xenia)
 } screen_t;
 
 // Maps the front buffer and fills in the video mode. Returns false (and

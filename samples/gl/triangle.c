@@ -1,7 +1,9 @@
-// gl_triangle: a white triangle on black, via the Mesa softpipe GL backend.
+// gl_triangle: hardware-accelerated magenta triangle via real OpenGL.
 //
-// Demonstrates the classic immediate-mode fixed-function pipeline
-// (glBegin/glVertex2f/glEnd) working on the compatibility-profile context.
+// Classic fixed-function pipeline (glClear + glBegin/glVertex/glEnd) on a
+// Mesa compatibility context.  With the xenos backend the whole frame -
+// draw, resolve and present - runs on the GPU through PM4; with softpipe
+// it falls back to the CPU blit path.
 
 #include <xecore/xboxkrnl.h>
 
@@ -17,29 +19,33 @@ void main(void)
     if (!glsample_init(&s))
         return;
 
-    glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
-    glClear(GL_COLOR_BUFFER_BIT);
-    DbgPrint("gl_triangle: cleared");
+    /* The default GL viewport is (0,0,0,0); without a real viewport the
+     * NDC->pixel transform has zero scale, so no fragments are rasterized. */
+    glViewport(0, 0, s.screen.width, s.screen.height);
 
-    glColor3f(1.0f, 1.0f, 1.0f);
-    DbgPrint("gl_triangle: begin");
-    glBegin(GL_TRIANGLES);
-    DbgPrint("gl_triangle: v0");
-    glVertex2f(-1.0f, -1.0f);
-    DbgPrint("gl_triangle: v1");
-    glVertex2f(1.0f, -1.0f);
-    DbgPrint("gl_triangle: v2");
-    glVertex2f(0.0f, 1.0f);
-    DbgPrint("gl_triangle: end");
-    glEnd();
-    DbgPrint("gl_triangle: drawn");
+    glMatrixMode(GL_PROJECTION);
+    glLoadIdentity();
+    glOrtho(-1.0, 1.0, -1.0, 1.0, -1.0, 1.0);
+    glMatrixMode(GL_MODELVIEW);
+    glLoadIdentity();
 
-    DbgPrint("gl_triangle: probe written");
-
-    glsample_flip(&s);
-
+    uint32_t frame = 0;
     for (;;)
     {
+        glClearColor(1.0f, 0.0f, 0.0f, 1.0f);   // red clear (diagnostic)
+        glClear(GL_COLOR_BUFFER_BIT);
+
+        glBegin(GL_TRIANGLES);
+        glColor3f(1.0f, 0.0f, 1.0f);   // magenta
+        glVertex2f(-0.6f, -0.6f);
+        glVertex2f( 0.6f, -0.6f);
+        glVertex2f( 0.0f,  0.6f);
+        glEnd();
+
+        if ((frame++ % 30) == 0)
+            DbgPrint("gl_triangle: frame %u", frame);
+
+        glsample_flip(&s);
         glsample_wait(&s);
     }
 }

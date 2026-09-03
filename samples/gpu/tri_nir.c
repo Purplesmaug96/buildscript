@@ -1,15 +1,18 @@
 // gpu/tri_nir: dev triangle through the real GPU path
 //
 // Draws a magenta triangle the way D3D9 would: the vertex/fragment shaders
-// are built as NIR and compiled to Xenos microcode by the new NIR->microcode
+// are built as NIR and compiled to Xenos microcode by the NIR->microcode
 // compiler (xenos_compile_nir in libxbox360.a), uploaded to the GPU with
 // PM4_IM_LOAD_IMMEDIATE, and drawn into EDRAM tile 0 (640x480 8_8_8_8).
-// The render target is then resolved back to system memory
-// (RB_MODECONTROL kCopy + RB_COPY_*) into a tiled buffer, unswizzled into
-// the front buffer, and presented with VdSwap.
+// The render target is resolved to system memory (RB_MODECONTROL kCopy +
+// RB_COPY_*), texture fetch constant 0 is pointed at the resolved surface,
+// and VdSwap presents it: xenia samples fetch constant 0 through its texture
+// cache, which serves the GPU-written data directly - no CPU readback or
+// unswizzle anywhere.
 //
 // Nothing here touches GL: it exercises the raw PM4/EDRAM path end to end.
-// Expected result under Xenia: a magenta triangle on black.
+// Expected result under Xenia: a magenta triangle on black, presented by the
+// host swap path.
 
 #include <xecore/xboxkrnl.h>
 #include <xbox360/xenos_gpu.h>
@@ -64,6 +67,18 @@ void main(void)
         screen.xenia_ring_wptr = wptr;
     }
     DbgPrint("main: dev triangle (NIR) ok, presenting at wptr=%u", wptr);
+
+    // Present with the GPU: hand VdSwap the tiled resolve destination as the
+    // swap source (texture fetch constant 0) instead of a CPU-written front
+    // buffer.  Xenia's presenter samples it through its texture cache, which
+    // serves GPU-written data directly.
+    {
+        uint32_t base, w, h;
+        xe_gpu_get_resolve_surface(&base, &w, &h);
+        screen.present_base = base;
+        screen.present_w = w;
+        screen.present_h = h;
+    }
 
     // The front buffer holds the unswizzled render; keep handing it to the
     // GPU every frame (Xenia has no scanout).

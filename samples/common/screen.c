@@ -83,19 +83,19 @@ typedef struct xenia_fetch
     uint32_t dword[6];
 } xenia_fetch_t;
 
-// Fills the fetch describing a linear 32bpp XRGB surface at fb_address.
+// Fills the fetch describing a 32bpp XRGB surface. Linear for the front
+// buffer; tiled when presenting a GPU-resolved surface (present_base).
 static void xenia_build_fetch(xenia_fetch_t *fetch, uint32_t fb_address,
-                              uint32_t width, uint32_t height)
+                              uint32_t width, uint32_t height, uint32_t tiled)
 {
-    uint32_t pitch_bytes = width * 4; // 1280x720 32bpp: 5120 bytes/row, 256-aligned
-
     uint32_t host[6] = { 0, 0, 0, 0, 0, 0 };
 
     // dword 0: type (2 = kTexture) at bits 0-1, pitch at 22-30. Xenia reads
     // the pitch field as texels >> 5 (pixels per 32-texel row), so 1280 wide
     // -> 40, and derives the byte pitch from it (like real games' D3D9
     // headers). Bytes>>5 (160) would make Xenia think rows are 4x too wide.
-    host[0] = 2u | ((width >> 5) << 22);
+    // Bit 31 selects the tiled texture address function.
+    host[0] = 2u | ((width >> 5) << 22) | (tiled ? (1u << 31) : 0u);
     // dword 1: format (6 = k_8_8_8_8, xenos TextureFormat) at bits 0-5,
     //           endianness at 6-7, base address >> 12 at bits 12-31
     host[1] = (6 /* k_8_8_8_8 */ << 0) | (XENIA_TEXEL_ENDIANNESS << 6) | ((fb_address >> 12) << 12);
@@ -126,11 +126,28 @@ static bool xenia_init(screen_t *screen, const VIDEO_MODE *mode,
     screen->xenia_ring_wptr = 0;
 
     // The ring buffer lives in physical memory; tell the GPU where it is.
+    // Scrub the ring so every dword parses as a Type-2 NOP even where
+    // stale data from earlier runs lingers (0x80 bytes => 0x80808080).
+    memset(ring, 0x80, XENIA_RING_BYTES);
     uint32_t ring_phys = MmGetPhysicalAddress(ring);
     DbgPrint("xenia_init: fb=0x%08x ring=0x%08x ring_phys=0x%08x w=%u h=%u",
              screen->xenia_fb_address, screen->xenia_ring_address, ring_phys,
              screen->width, screen->height);
     VdInitializeRingBuffer((void *)(uintptr_t)ring_phys, XENIA_RING_SIZE_LOG2);
+
+    // Read-pointer writeback page: the CP stores its current read offset
+    // here so drivers can avoid overwriting unconsumed ring space.
+    {
+        void *rptr = MmAllocatePhysicalMemoryEx(
+            REGION_AUTO, 0x1000u, XENIA_PAGE_READWRITE, 0u, 0xFFFFFFFFu,
+            0x1000u);
+        if (rptr)
+        {
+            *(volatile uint32_t *)rptr = 0;
+            VdEnableRingBufferRPtrWriteBack(MmGetPhysicalAddress(rptr), 6);
+            screen->xenia_rptr_page = (volatile uint32_t *)rptr;
+        }
+    }
 
     return true;
 }
@@ -296,12 +313,38 @@ void screen_present(screen_t *screen)
     uint32_t color_space = 0; // RGB
     uint32_t dims[2] = { w, h };
 
+    // GPU-present override: when set, present the resolved surface written
+    // by the GPU (tiled) instead of the CPU-written front buffer (linear).
+    if (screen->present_base)
+    {
+        fb = screen->present_base;
+        w = screen->present_w;
+        h = screen->present_h;
+        dims[0] = w;
+        dims[1] = h;
+    }
+
     xenia_fetch_t fetch;
-    xenia_build_fetch(&fetch, fb, w, h);
+    xenia_build_fetch(&fetch, fb, w, h, screen->present_base ? 1u : 0u);
 
     // The write pointer is a free-running dword counter; the GPU wraps it
     // into the ring internally, so never mask it down to the ring size.
-    uint32_t block = screen->xenia_ring_wptr & (XENIA_RING_DWORDS - 1);
+    // VdSwap writes one contiguous 64-dword block, so if the masked offset
+    // would cross the end of the ring, pad the tail with on-wire Type-2 NOPs
+    // and continue at the start (keeps the CP parse valid across the seam).
+    uint32_t old_mod = screen->xenia_ring_wptr & (XENIA_RING_DWORDS - 1);
+    if (old_mod + XENIA_RING_BLOCK > XENIA_RING_DWORDS)
+    {
+        volatile uint32_t *ring =
+            (volatile uint32_t *)(uintptr_t)screen->xenia_ring_address;
+        uint32_t i = old_mod;
+        while (i < XENIA_RING_DWORDS)
+            ring[i++] = 0x80000000u;     // Type-2 NOP (BE store)
+        // Jump the free-running pointer to the (wrapped) ring start.
+        screen->xenia_ring_wptr += XENIA_RING_DWORDS - old_mod;
+        old_mod = 0;
+    }
+    uint32_t block = old_mod;
     void *ring_slot = (void *)(uintptr_t)(screen->xenia_ring_address + block * 4);
 
     VdSwap(ring_slot, &fetch, 0, 0, 0, &fb, &format, &color_space, &dims[0], &dims[1]);
