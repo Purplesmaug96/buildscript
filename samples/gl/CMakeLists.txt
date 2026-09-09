@@ -17,7 +17,7 @@ target_link_libraries(glsample PRIVATE screen)
 # All OpenGL quantities and prototypes come from <GL/gl.h>; the fixed
 # pipeline and classic entry points are provided by the xbox360 backend
 # (libxbox360.a, located by the parent samples/CMakeLists.txt).
-foreach(_sample magenta triangle cube map)
+foreach(_sample magenta triangle cube map texture)
     add_executable(gl_${_sample} ${_sample}.c)
     target_link_libraries(gl_${_sample} PRIVATE glsample
         "${XECHAIN_XBOX360_GL_LIBRARY}")
