@@ -13,3 +13,6 @@
 [submodule "mesa"]
 	path = mesa
 	url = https://github.com/Purplesmaug96/Mesa.git
+[submodule "sdl"]
+	path = sdl
+	url = https://github.com/Purplesmaug96/SDL.git
