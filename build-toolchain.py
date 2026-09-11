@@ -63,13 +63,14 @@ LIBUNWIND_BUILD_DIR = f"{BUILD_DIR}/libunwind"
 SYNTHXEX_BUILD_DIR = f"{BUILD_DIR}/synthxex"
 PTHREAD_BUILD_DIR = f"{BUILD_DIR}/pthread"
 MESA_BUILD_DIR = f"{BUILD_DIR}/mesa"
+SDL_BUILD_DIR = f"{BUILD_DIR}/sdl"
 
 # Build log path
 BUILD_LOG = f"{SCRIPT_DIR}/build.log"
 with open(BUILD_LOG, "w", encoding="utf-8") as _log:
 	pass  # Delete the old logs, if they exist
 
-ALL_COMPONENTS = ["llvm", "xecorelib", "newlib", "crt", "libcxx", "pthread", "synthxex", "mesa"]
+ALL_COMPONENTS = ["llvm", "xecorelib", "newlib", "crt", "libcxx", "pthread", "synthxex", "mesa", "sdl"]
 
 BASH = shutil.which("bash")
 
@@ -650,6 +651,54 @@ def build_component_mesa() -> int:
 	xe_print("Mesa built and installed!")
 	return 0
 
+# ---------------------------------------------------------------------------
+# Component: sdl - SDL3, cross-compiled for the console and installed into the
+# sysroot (lib/libSDL3.a, include/SDL3).  The bundled xbox360 video driver
+# wraps the scanout + Mesa (libxbox360.a) backend and the xbox360 timer
+# backend uses KeQuerySystemTime.  Only the video (xbox360 driver), renderer
+# (software) and timers subsystems are enabled.  This is what enables the
+# samples/sdl_* programs.
+# ---------------------------------------------------------------------------
+def build_component_sdl() -> int:
+	xe_print("Getting ready to build SDL3 (xbox360 driver).")
+
+	# SDL3 targets the console, so the cross compiler's environment must be
+	# clean too (clang honours LIBRARY_PATH/C_INCLUDE_PATH even when the
+	# target is ppc32-xbox360).
+	clear_cross_env()
+
+	xe_print("Configuring SDL3...")
+	run_cmd("cmake -S \"{SCRIPT_DIR}/sdl\" -B {SDL_BUILD_DIR} "
+	        "-DCMAKE_TOOLCHAIN_FILE=\"{SCRIPT_DIR}/cmake/ppc-xbox360-toolchain.cmake\" "
+	        "-DCMAKE_INSTALL_PREFIX=\"{PREFIX}\" "
+	        "-DXECHAIN_SYSROOT=\"{PREFIX}\" "
+	        "-DCMAKE_BUILD_TYPE=\"{BUILD_TYPE}\" "
+	        "-DSDL_SHARED=OFF "
+	        "-DSDL_STATIC=ON "
+	        "-DSDL_TEST_LIBRARY=OFF "
+	        "-DSDL_EXAMPLES=OFF "
+	        "-DSDL_AUDIO=OFF "
+	        "-DSDL_VIDEO=ON "
+	        "-DSDL_RENDER=ON "
+	        "-DSDL_JOYSTICK=OFF "
+	        "-DSDL_HAPTIC=OFF "
+	        "-DSDL_HIDAPI=OFF "
+	        "-DSDL_CAMERA=OFF "
+	        "-DSDL_SENSOR=OFF "
+	        "-DSDL_POWER=OFF "
+	        "-DSDL_GPU=OFF "
+	        "-G \"Ninja\"".format(SCRIPT_DIR=SCRIPT_DIR, SDL_BUILD_DIR=SDL_BUILD_DIR,
+	                             PREFIX=PREFIX, BUILD_TYPE=BUILD_TYPE))
+
+	# Build and install
+	xe_print("Building SDL3...")
+	run_cmd(f"cmake --build {SDL_BUILD_DIR} -j{PARALLEL}")
+	xe_print("Installing SDL3...")
+	run_cmd(f"cmake --install {SDL_BUILD_DIR}")
+
+	xe_print("SDL3 built and installed!")
+	return 0
+
 def build_component(component) -> int:
 	if component == "llvm":
 		return build_component_llvm()
@@ -667,9 +716,11 @@ def build_component(component) -> int:
 		return build_component_synthxex()
 	elif component == "mesa":
 		return build_component_mesa()
+	elif component == "sdl":
+		return build_component_sdl()
 	else:
 		xe_print(f"{ANSI_RED}Unknown component \"{component}\"! Valid components: "
-		         f"llvm xecorelib newlib crt libcxx pthread synthxex mesa{ANSI_CLEAR}")
+		         f"llvm xecorelib newlib crt libcxx pthread synthxex mesa sdl{ANSI_CLEAR}")
 		return 1
 
 def main(argv, argc) -> int:
@@ -699,10 +750,11 @@ def main(argv, argc) -> int:
 			print(", ", end="")
 	print("")
 
-	for submodule in ["newlib", "llvm", "synthxex", "xecorelib", "mesa"]:
+	for submodule in ["newlib", "llvm", "synthxex", "xecorelib", "mesa", "sdl"]:
 		if not os.path.isdir(submodule):
 			print(f"{TOOLCHAIN_STEM}{ANSI_RED}Submodules are missing! "
-			      f"Please re-clone this repository with --recursive.{ANSI_CLEAR}")
+			      f"Please re-clone this repository with --recursive. "
+				  f"Or: 'git submodule update --init --recursive' should also do the trick.{ANSI_CLEAR}")
 			return 1
 
 	if CLEAN == "1":
@@ -715,7 +767,7 @@ def main(argv, argc) -> int:
 	for directory in [LLVM_BUILD_DIR, XECORELIB_BUILD_DIR, XECORELIB_STAGE_DIR,
 	                  NEWLIB_BUILD_DIR, CRT_BUILD_DIR, LIBCXX_BUILD_DIR,
 	                  LIBCXXABI_BUILD_DIR, LIBUNWIND_BUILD_DIR, SYNTHXEX_BUILD_DIR,
-	                  PTHREAD_BUILD_DIR, MESA_BUILD_DIR]:
+	                  PTHREAD_BUILD_DIR, MESA_BUILD_DIR, SDL_BUILD_DIR]:
 		os.makedirs(directory, exist_ok=True)
 
 	# Make sure all required dependencies are installed

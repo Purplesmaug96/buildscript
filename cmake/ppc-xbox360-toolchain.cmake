@@ -50,7 +50,7 @@ endif()
 
 # --- Target description ------------------------------------------------------
 
-set(CMAKE_SYSTEM_NAME Generic)
+set(CMAKE_SYSTEM_NAME xbox360)
 set(CMAKE_SYSTEM_PROCESSOR ppc32)
 set(CMAKE_SYSTEM_VERSION xbox360)
 

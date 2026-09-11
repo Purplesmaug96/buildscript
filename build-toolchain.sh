@@ -32,15 +32,15 @@ LLVM_LINK_JOBS="${LLVM_LINK_JOBS:-2}" # Max parallel link jobs for LLVM (linking
 CLEAN="${CLEAN:-0}" # Set to 1 to wipe the build directories before building
 
 # Components to build. Each positional argument names a component to build:
-#   ./build-toolchain.sh llvm newlib mesa
+#   ./build-toolchain.sh llvm newlib mesa sdl
 # With no arguments (and no COMPONENT variable), all components are built in
-# dependency order.  Valid names: llvm xecorelib newlib crt libcxx pthread mesa
+# dependency order.  Valid names: llvm xecorelib newlib crt libcxx pthread mesa sdl
 if [[ $# -gt 0 ]]; then
     COMPONENTS=("$@")
 elif [[ -n "${COMPONENT:-}" ]]; then
     COMPONENTS=("${COMPONENT}")
 else
-    COMPONENTS=(llvm xecorelib newlib crt libcxx pthread synthxex mesa)
+    COMPONENTS=(llvm xecorelib newlib crt libcxx pthread synthxex mesa sdl)
 fi
 
 # Static variables
@@ -62,6 +62,7 @@ LIBUNWIND_BUILD_DIR="${BUILD_DIR}/libunwind"
 SYNTHXEX_BUILD_DIR="${BUILD_DIR}/synthxex"
 PTHREAD_BUILD_DIR="${BUILD_DIR}/pthread"
 MESA_BUILD_DIR="${BUILD_DIR}/mesa"
+SDL_BUILD_DIR="${BUILD_DIR}/sdl"
 
 # Build log path
 BUILD_LOG="${SCRIPT_DIR}/build.log"
@@ -665,7 +666,60 @@ build_mesa()
     echo -e "${TOOLCHAIN_STEM}Mesa built and installed!"
 }
 
-if [[ ! -d "newlib" || ! -d "llvm" || ! -d "synthxex" || ! -d "xecorelib" || ! -d "mesa" ]]; then
+# ---------------------------------------------------------------------------
+# Component: sdl - SDL3, cross-compiled for the console
+#
+# SDL3's SDL_CreateWindow/SDL_GL_CreateContext/SDL_Renderer give homebrew a
+# common API; the bundled xbox360 video driver wraps the scanout + Mesa
+# (libxbox360.a) backend and the xbox360 timer backend uses KeQuerySystemTime.
+# Only the video (xbox360 driver), renderer (software) and timers subsystems
+# are enabled; audio, input, camera, sensor, power, GPU and the rest are out
+# of scope for now.  The static library is installed into the sysroot
+# (lib/libSDL3.a) with its headers, so samples link -lSDL3 along with
+# -lxbox360 and -lxecorelib (the latter two come from the .cfg files).
+# ---------------------------------------------------------------------------
+build_sdl()
+{
+    echo -e "${TOOLCHAIN_STEM}Getting ready to build SDL3 (xbox360 driver)."
+
+    # SDL3 targets the console, so the cross compiler's environment must be
+    # clean too (clang honours LIBRARY_PATH/C_INCLUDE_PATH even when the
+    # target is ppc32-xbox360).
+    clear_cross_env
+
+    echo -e "${TOOLCHAIN_STEM}Configuring SDL3..."
+    cmake -S "${SCRIPT_DIR}/sdl" -B "${SDL_BUILD_DIR}" \
+          -DCMAKE_TOOLCHAIN_FILE="${SCRIPT_DIR}/cmake/ppc-xbox360-toolchain.cmake" \
+          -DCMAKE_INSTALL_PREFIX="${PREFIX}" \
+          -DXECHAIN_SYSROOT="${PREFIX}" \
+          -DCMAKE_BUILD_TYPE="${BUILD_TYPE}" \
+          -DSDL_SHARED=OFF \
+          -DSDL_STATIC=ON \
+          -DSDL_TEST_LIBRARY=OFF \
+          -DSDL_EXAMPLES=OFF \
+          -DSDL_AUDIO=OFF \
+          -DSDL_VIDEO=ON \
+          -DSDL_RENDER=ON \
+          -DSDL_JOYSTICK=OFF \
+          -DSDL_HAPTIC=OFF \
+          -DSDL_HIDAPI=OFF \
+          -DSDL_CAMERA=OFF \
+          -DSDL_SENSOR=OFF \
+          -DSDL_POWER=OFF \
+          -DSDL_GPU=OFF \
+          -G "Ninja" >> "${BUILD_LOG}" 2>&1 || fail_build
+
+    # Build and install
+    echo -e "${TOOLCHAIN_STEM}Building SDL3..."
+    ninja -C "${SDL_BUILD_DIR}" -j"${PARALLEL}" >> "${BUILD_LOG}" 2>&1 || fail_build
+
+    echo -e "${TOOLCHAIN_STEM}Installing SDL3..."
+    ninja -C "${SDL_BUILD_DIR}" install >> "${BUILD_LOG}" 2>&1 || fail_build
+
+    echo -e "${TOOLCHAIN_STEM}SDL3 built and installed!"
+}
+
+if [[ ! -d "newlib" || ! -d "llvm" || ! -d "synthxex" || ! -d "xecorelib" || ! -d "mesa" || ! -d "sdl" ]]; then
     echo -e "${TOOLCHAIN_STEM}${ANSI_RED}Submodules are missing! Please re-clone this repository with --recursive.${ANSI_CLR}"
     fail_build
 fi
@@ -685,7 +739,8 @@ mkdir -p "${PREFIX}" \
          "${LIBCXX_BUILD_DIR}" "${LIBCXXABI_BUILD_DIR}" "${LIBUNWIND_BUILD_DIR}" \
          "${SYNTHXEX_BUILD_DIR}" \
          "${PTHREAD_BUILD_DIR}" \
-         "${MESA_BUILD_DIR}" >> "${BUILD_LOG}" 2>&1 || fail_build
+         "${MESA_BUILD_DIR}" \
+         "${SDL_BUILD_DIR}" >> "${BUILD_LOG}" 2>&1 || fail_build
 
 # Make sure all required dependencies are installed
 echo -e "${TOOLCHAIN_STEM}Checking if required dependencies are installed."
@@ -702,8 +757,9 @@ for _component in "${COMPONENTS[@]}"; do
         pthread)   build_pthread ;;
         synthxex)  build_synthxex ;;
         mesa)      build_mesa ;;
+        sdl)       build_sdl ;;
         *)
-            echo -e "${TOOLCHAIN_STEM}${ANSI_RED}Unknown component \"${_component}\"! Valid components: llvm xecorelib newlib crt libcxx pthread synthxex mesa${ANSI_CLR}"
+            echo -e "${TOOLCHAIN_STEM}${ANSI_RED}Unknown component \"${_component}\"! Valid components: llvm xecorelib newlib crt libcxx pthread synthxex mesa sdl${ANSI_CLR}"
             fail_build
             ;;
     esac
