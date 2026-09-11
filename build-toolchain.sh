@@ -68,6 +68,8 @@ SDL_BUILD_DIR="${BUILD_DIR}/sdl"
 BUILD_LOG="${SCRIPT_DIR}/build.log"
 : > "${BUILD_LOG}" # Delete the old logs, if they exist
 
+echo "This script is deprecated and will be removed eventually; use build-toolchain.py if possible"
+
 # If we fail to build, run this
 fail_build()
 {

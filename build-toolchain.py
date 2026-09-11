@@ -724,8 +724,6 @@ def build_component(component) -> int:
 		return 1
 
 def main(argv, argc) -> int:
-	xe_print(f"{ANSI_YELLOW}WARNING: Using this script is not recommended; please use build-toolchain.sh if you can")
-
 	# Components to build. Each positional argument names a component to build:
 	#   python3 build-toolchain.py llvm newlib mesa
 	# With no arguments (and no COMPONENT variable), all components are built in
