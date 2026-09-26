@@ -78,7 +78,7 @@ def xe_print(string, end="\n"):
 	print(f"{TOOLCHAIN_STEM} {string}", end=end)
 
 def fail_build():
-	print(f"{TOOLCHAIN_STEM}{ANSI_RED}Failed to build! Check {BUILD_LOG}.{ANSI_CLEAR}")
+	print(f"{TOOLCHAIN_STEM}{ANSI_RED} Failed to build! Check {BUILD_LOG}.{ANSI_CLEAR}")
 	sys.exit(1)
 
 def run_cmd(cmd, cwd=None, quiet=False, check=True):
