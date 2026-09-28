@@ -414,6 +414,17 @@ setup_libcxx()
     local libunwind_lib="${PREFIX}/${NEWLIB_TARGET}/lib/libunwind.a"
     local cxx_include="${PREFIX}/include/c++/v1"
 
+    # The pthread component runs *after* libcxx in COMPONENTS, but the
+    # -D_POSIX_* feature macros it writes into the Clang config scripts are
+    # needed to even compile libc++: Newlib's <pthread.h> hides every
+    # prototype behind _POSIX_THREADS, and chrono.cpp needs _POSIX_TIMERS for
+    # clock_gettime (else: "Monotonic clock not implemented on this
+    # platform").  Write them here so the config is right no matter what
+    # order the components are built in.  Only the macros - the
+    # -Wl,/defaultlib: lines stay with the pthread component so the static
+    # link order is unchanged.  Idempotent.
+    setup_pthread_cfg_macros
+
     # Wire the C++ library into the Clang config scripts as early as
     # possible: clang++ configs are applied in the same order as the files
     # on disk, so the libc++ include dir must come *before* the Newlib
@@ -556,6 +567,30 @@ build_synthxex()
 # image via the Clang config scripts - exactly what the Mesa CMake port
 # expects from "the toolchain" (see cmake/mesa-checks.cmake).
 # ---------------------------------------------------------------------------
+# The POSIX feature macros Newlib's <pthread.h> and libc++'s chrono.cpp need
+# to see the pthread prototypes and clock_gettime().  These are plain -D
+# flags with no dependency on the shim library, so they are kept separate
+# from the link line: setup_libcxx() writes them before libc++ is compiled
+# (the pthread component runs after libcxx), while -Wl,/defaultlib: must stay
+# where the pthread component puts it.  Idempotent across re-runs.
+setup_pthread_cfg_macros()
+{
+    for cfg in "${PREFIX}/bin/clang.cfg" "${PREFIX}/bin/clang++.cfg"; do
+        if ! grep -q -e "-D_POSIX_THREADS" "${cfg}" 2>/dev/null; then
+            cat >> "${cfg}" << EOF
+-D_POSIX_THREADS
+-D_POSIX_BARRIERS
+-D_POSIX_READER_WRITER_LOCKS
+-D_POSIX_TIMEOUTS
+-D_UNIX98_THREAD_MUTEX_ATTRIBUTES
+-D_POSIX_CLOCK_SELECTION
+-D_POSIX_MONOTONIC_CLOCK
+-D_POSIX_TIMERS
+EOF
+        fi
+    done
+}
+
 setup_pthread_shim()
 {
     local pthread_lib="${PREFIX}/${NEWLIB_TARGET}/lib/libpthread.a"
@@ -593,19 +628,13 @@ setup_pthread_shim()
         fi
     fi
 
-    # Append the POSIX feature macros and the libpthread default link to the
-    # Clang config scripts, once.  Idempotent across re-runs.
+    # The feature macros first (setup_libcxx() may already have written
+    # them), then the libpthread/libm default link.  Idempotent across
+    # re-runs.
+    setup_pthread_cfg_macros
     for cfg in "${PREFIX}/bin/clang.cfg" "${PREFIX}/bin/clang++.cfg"; do
         if ! grep -q "${cfg_line}" "${cfg}" 2>/dev/null; then
             cat >> "${cfg}" << EOF
--D_POSIX_THREADS
--D_POSIX_BARRIERS
--D_POSIX_READER_WRITER_LOCKS
--D_POSIX_TIMEOUTS
--D_UNIX98_THREAD_MUTEX_ATTRIBUTES
--D_POSIX_CLOCK_SELECTION
--D_POSIX_MONOTONIC_CLOCK
--D_POSIX_TIMERS
 -Wl,/defaultlib:${cfg_line}
 EOF
         fi
@@ -699,7 +728,9 @@ build_sdl()
           -DSDL_STATIC=ON \
           -DSDL_TEST_LIBRARY=OFF \
           -DSDL_EXAMPLES=OFF \
-          -DSDL_AUDIO=OFF \
+          -DSDL_AUDIO=ON \
+          -DSDL_DUMMYAUDIO=OFF \
+          -DSDL_DISKAUDIO=OFF \
           -DSDL_VIDEO=ON \
           -DSDL_RENDER=ON \
           -DSDL_JOYSTICK=OFF \
