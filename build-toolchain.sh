@@ -170,6 +170,12 @@ check_deps()
     python3 -c "import yaml" >> "${BUILD_LOG}" 2>&1 ||
         (MISSING_DEPS=1 && echo -e "${TOOLCHAIN_STEM}${ANSI_RED}Missing python-pyyaml!${ANSI_CLR}")
 
+    # Mesa generates its GLSL C code with mako and refuses to configure
+    # without it (mesa/CMakeLists.txt: "Python with mako and yaml modules is
+    # required"), so catch it here instead of several components later.
+    python3 -c "import mako" >> "${BUILD_LOG}" 2>&1 ||
+        (MISSING_DEPS=1 && echo -e "${TOOLCHAIN_STEM}${ANSI_RED}Missing python-mako! (pip install mako)${ANSI_CLR}")
+
     if [[ ${MISSING_DEPS} -ne 0 ]]; then
         echo -e "${TOOLCHAIN_STEM}${ANSI_RED}Dependencies are missing! Please install them.${ANSI_CLR}"
     fi

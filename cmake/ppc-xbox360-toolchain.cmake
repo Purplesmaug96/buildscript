@@ -90,6 +90,25 @@ set(CMAKE_FIND_ROOT_PATH_MODE_LIBRARY ONLY)
 set(CMAKE_FIND_ROOT_PATH_MODE_INCLUDE ONLY)
 set(CMAKE_FIND_ROOT_PATH_MODE_PACKAGE ONLY)
 
+# There is no Platform/xbox360.cmake module, so CMake never loads a paths
+# module for this system and CMAKE_SYSTEM_PREFIX_PATH ends up empty (that is
+# what the repeated "System is unknown to cmake" messages are about).  With no
+# prefixes, find_library()/find_path() have nothing to search at all and every
+# probe returns NOTFOUND - e.g. Mesa dies with "M_LIB ... set to NOTFOUND".
+# Spell out the target directories explicitly instead.  They mirror what
+# clang.cfg puts on the command line: Newlib (crt0/libc/libm) lives in
+# ppc-xbox360/, while libc++, SDL, Mesa and xecorelib are installed into the
+# sysroot prefix itself.
+list(APPEND CMAKE_LIBRARY_PATH
+    "${XECHAIN_SYSROOT}/ppc-xbox360/lib"
+    "${XECHAIN_SYSROOT}/lib")
+list(APPEND CMAKE_INCLUDE_PATH
+    "${XECHAIN_SYSROOT}/ppc-xbox360/include"
+    "${XECHAIN_SYSROOT}/include")
+list(APPEND CMAKE_PREFIX_PATH
+    "${XECHAIN_SYSROOT}/ppc-xbox360"
+    "${XECHAIN_SYSROOT}")
+
 # Never let pkg-config see the host system's package database: the sysroot is
 # self-contained.  There are no .pc files in it yet, so host-only dependencies
 # (valgrind, libunwind, libdrm, X11, ...) are simply not found, which is the
