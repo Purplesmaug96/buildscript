@@ -21,6 +21,14 @@
 # unless the .cfg files are updated too.
 # ============================================================================
 
+# CMake looks for Platform/${CMAKE_SYSTEM_NAME}.cmake through CMAKE_MODULE_PATH
+# (see Modules/CMakeSystemSpecificInformation.cmake), so let it find the
+# sibling Platform/xbox360.cmake.  This must happen before the double-load
+# guard below, otherwise try_compile sub-projects that take the early return
+# would print "System is unknown to cmake" again.
+list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_LIST_DIR}")
+list(REMOVE_DUPLICATES CMAKE_MODULE_PATH)
+
 if(CMAKE_C_COMPILER)
     # Toolchain file is being loaded twice (e.g. CMake >= 3.21 loads it for
     # try_compile sub-projects); the toolchain is already set up.
