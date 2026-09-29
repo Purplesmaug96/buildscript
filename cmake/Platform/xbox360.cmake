@@ -22,3 +22,22 @@
 # ppc-xbox360-toolchain.cmake adds its own directory to.
 # ============================================================================
 include(Platform/Generic)
+
+# --- No position-independent code -------------------------------------------
+#
+# The ppc32-xbox360 backend cannot emit position-independent code: compiling
+# a single -fPIC/-fPIE object dies with
+#
+#     error: assembler label '' can not be undefined
+#
+# (llvm/lib/MC/WinCOFFObjectWriter.cpp), and there is nothing to be PIC for
+# anyway - the console links static PE/XEX archives only.
+#
+# Blank here where it works for C/CXX, but ASM's language information is
+# processed after this file, so the authoritative blanking lives in
+# cmake/xbox360-no-pic.cmake (reached through CMAKE_PROJECT_INCLUDE, which
+# CMake runs as the last step of every project() command).
+set(CMAKE_C_COMPILE_OPTIONS_PIC "")
+set(CMAKE_CXX_COMPILE_OPTIONS_PIC "")
+set(CMAKE_C_COMPILE_OPTIONS_PIE "")
+set(CMAKE_CXX_COMPILE_OPTIONS_PIE "")

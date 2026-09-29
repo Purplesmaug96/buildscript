@@ -29,6 +29,17 @@
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_LIST_DIR}")
 list(REMOVE_DUPLICATES CMAKE_MODULE_PATH)
 
+# Suppress -fPIC/-fPIE build-wide: the ppc32-xbox360 backend cannot emit
+# position-independent code - one such object already fails with
+#     error: assembler label '' can not be undefined
+# This has to be CMAKE_PROJECT_INCLUDE rather than a plain set() here: the
+# toolchain file runs before Compiler/GNU, which stamps -fPIC/-fPIE into the
+# language variables afterwards, and the ASM language information is processed
+# later still.  CMake includes CMAKE_PROJECT_INCLUDE as the last step of every
+# project() command, i.e. after every language has been determined, so the
+# blanking there always wins.  See cmake/xbox360-no-pic.cmake.
+set(CMAKE_PROJECT_INCLUDE "${CMAKE_CURRENT_LIST_DIR}/xbox360-no-pic.cmake")
+
 if(CMAKE_C_COMPILER)
     # Toolchain file is being loaded twice (e.g. CMake >= 3.21 loads it for
     # try_compile sub-projects); the toolchain is already set up.
