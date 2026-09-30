@@ -663,6 +663,7 @@ def build_component_mesa() -> int:
 	        "-DXECHAIN_SYSROOT=\"{PREFIX}\" "
 	        "-DCMAKE_BUILD_TYPE=\"{BUILD_TYPE}\" "
 	        "-DMESA_OP_GALLIUM_DRIVERS=\"softpipe;xbox360\" "
+	        "-DMESA_OP_XBOX360_XENOS=\"{MESA_OP_XBOX360_XENOS}\" "
 	        "-DMESA_OP_GLX=disabled "
 	        "-DMESA_OP_EGL=OFF "
 	        "-DMESA_OP_LLVM=disabled "
@@ -673,6 +674,7 @@ def build_component_mesa() -> int:
 	        "-DX360_CPU_PROBE_VSX=\"{X360_CPU_PROBE_VSX}\" "
 	        "-G \"Ninja\"".format(SCRIPT_DIR=SCRIPT_DIR, MESA_BUILD_DIR=MESA_BUILD_DIR,
 	                             PREFIX=PREFIX, BUILD_TYPE=BUILD_TYPE,
+	                             MESA_OP_XBOX360_XENOS=os.environ.get("MESA_OP_XBOX360_XENOS", "ON"),
 	                             X360_RING_REV=os.environ.get("X360_RING_REV", "OFF"),
 	                             X360_RING_ROT=os.environ.get("X360_RING_ROT", "0"),
 	                             X360_CPU_PROBE_VSX=os.environ.get("X360_CPU_PROBE_VSX", "OFF")))

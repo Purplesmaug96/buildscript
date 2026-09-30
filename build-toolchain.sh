@@ -684,6 +684,7 @@ build_mesa()
           -DXECHAIN_SYSROOT="${PREFIX}" \
           -DCMAKE_BUILD_TYPE="${BUILD_TYPE}" \
           -DMESA_OP_GALLIUM_DRIVERS="softpipe;xbox360" \
+          -DMESA_OP_XBOX360_XENOS="${MESA_OP_XBOX360_XENOS:-ON}" \
           -DMESA_OP_GLX=disabled \
           -DMESA_OP_EGL=OFF \
           -DMESA_OP_LLVM=disabled \
